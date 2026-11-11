@@ -7,10 +7,19 @@
 <style>
   html, body { margin: 0; height: 100%; background: #1F2A17; overflow: hidden; }
   canvas { display: block; width: 100vw; height: 100vh; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #sb { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); font: 600 16px system-ui, sans-serif; color: #e8ecd8; }
+  #sb .p { background: #1d2416; border: 2px solid #ffd64a; border-radius: 10px; padding: 18px 20px; width: min(340px, 86vw); max-height: 86vh; overflow: auto; }
+  #sb h2 { margin: 0 0 10px; color: #ffd64a; font-size: 22px; text-align: center; }
+  #sb table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; }
+  #sb td { padding: 4px 4px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+  #sb td.r { text-align: right; } #sb tr.me td { color: #ffd64a; }
+  #sb input { width: 100%; box-sizing: border-box; font: 600 18px system-ui, sans-serif; padding: 8px; border-radius: 6px; border: 1px solid #8a8; background: #0f140b; color: #fff; }
+  #sb button { width: 100%; margin-top: 10px; font: 700 17px system-ui, sans-serif; padding: 10px; border: 0; border-radius: 6px; background: #ffd64a; color: #1d2416; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="sb"><div class="p"></div></div>
 <script>
 "use strict";
 // Apocalypse Now! (repo rotorwash) 1.8 (drag only, fixed buttons, hold GUN, ammo, base arrow); 0.2 — a helicopter over a little world. Flick to fly (it tilts and coasts), flick
@@ -593,9 +602,6 @@ function liftNow() { if (mode === 'heli' && heli.want === 0 && fuel > 0 && !dead
 cv.addEventListener('pointerdown', e => {
   cv.setPointerCapture(e.pointerId);
   rec({ e: 'd', id: e.pointerId, x: r1(e.clientX), y: r1(e.clientY), hd: r3(heli.hd), vx: r1(heli.vx), vy: r1(heli.vy), alt: r3(heli.alt), mode });
-  if (!dead && !won && !mapBig && e.clientX >= markR.x && e.clientX <= markR.x + markR.w && e.clientY >= markR.y && e.clientY <= markR.y + markR.h) {
-    rec({ e: 'mark' }); markT = 0.6; flushRec(); return;
-  }
   if (pickOpen) {
     const r = pickRows().find(r => r.open && e.clientX >= r.x && e.clientX <= r.x + r.w && e.clientY >= r.y && e.clientY <= r.y + r.h);
     if (r) pickLevel(r.lv); else pickOpen = false; return;
@@ -607,7 +613,7 @@ cv.addEventListener('pointerdown', e => {
     pickOpen = true; fingers.clear(); for (const k of Object.values(btn)) k.down = null; gunOn = gunLatch; return;
   }
   if (won) { if (won.t > 2) nextLevel(); return; }
-  if (dead) { if (dead.t > 3.5) { if (lives === 0) gameOver(); else restart(); } return; }
+  if (dead) { if (dead.t > 3.5) { if (lives === 0) showScores(gameOver); else restart(); } return; }
   // 2.2: tap the minimap = the whole map (the game waits); tap again to close
   if (mapBig) { mapBig = false; return; }
   if (e.clientX > miniR.x - 8 && e.clientX < miniR.x + miniR.s + 8 && e.clientY > miniR.y - 8 && e.clientY < miniR.y + miniR.s + 8) {
@@ -900,13 +906,36 @@ function nextLevel() { localStorage.setItem('apocalypse.level', LEVEL + 1); loca
 // 3.1 (the player 11-09 00:12 "make a map of the levels you've unlocked so you can select"): the highest level reached is
 // kept on the phone (apocalypse.max); the LEVELS button lists them, tap one to play it.
 let unlocked = 1; try { unlocked = Math.max(1, +(localStorage.getItem('apocalypse.max') || 1) | 0, +(localStorage.getItem('apocalypse.level') || 1) | 0, LEVEL); localStorage.setItem('apocalypse.max', unlocked); } catch (e) {}
-const lvlR = { x: 10, y: 196, w: 74, h: 30 };   // under BAD, clear of the message banner
+const lvlR = { x: 10, y: 158, w: 74, h: 30 };   // 3.16: up into the BAD button's old place   // under BAD, clear of the message banner
 let pickOpen = false;
 function pickRows() {
   const n = Math.max(THEMES.length, unlocked), rh = Math.min(64, (vh - 140) / n), w = Math.min(340, vw - 32), x = (vw - w) / 2, y0 = (vh - n * rh) / 2 + 16;
   return Array.from({ length: n }, (_, i) => ({ lv: i + 1, x, y: y0 + i * rh, w, h: rh - 8, open: i + 1 <= unlocked }));
 }
 function pickLevel(n) { localStorage.setItem('apocalypse.level', n); localStorage.removeItem('apocalypse.carry'); goLevel(n); }
+// 3.16 (the player 11-11 17:18 "allow people to enter their names on a scoreboard"): at game over, a top-10 table kept on
+// this device (apocalypse.scores). A score that makes the table asks for a name (the last one typed is filled in).
+const SB_N = 10;
+let sbOpen = false;
+function loadScores() { try { return JSON.parse(localStorage.getItem('apocalypse.scores') || '[]'); } catch (e) { return []; } }
+function showScores(then) {
+  if (sbOpen) return; sbOpen = true;
+  const box = document.getElementById('sb'), P = box.querySelector('.p'), list = loadScores();
+  const makes = score > 0 && (list.length < SB_N || score > list[list.length - 1].s);
+  const el = (tag, txt, cls) => { const e = document.createElement(tag); if (txt !== undefined) e.textContent = txt; if (cls) e.className = cls; return e; };
+  const table = (mine) => { const t = el('table'); list.forEach((r, i) => { const tr = el('tr', undefined, r === mine ? 'me' : ''); tr.append(el('td', (i + 1) + '.'), el('td', r.n), el('td', r.s.toLocaleString(), 'r'), el('td', 'LV ' + r.lv, 'r')); t.append(tr); }); return t; };
+  const done = () => { box.style.display = 'none'; sbOpen = false; then(); };
+  const board = (mine) => { P.replaceChildren(el('h2', 'SCOREBOARD'), list.length ? table(mine) : el('p', 'No scores yet.'));
+    const b = el('button', 'PLAY AGAIN'); b.onclick = done; P.append(b); };
+  box.style.display = 'flex';
+  if (!makes) { board(null); return; }
+  const inp = el('input'); inp.maxLength = 14; inp.placeholder = 'Your name'; try { inp.value = localStorage.getItem('apocalypse.name') || ''; } catch (e) {}
+  const save = () => { const n = inp.value.trim().slice(0, 14) || 'Pilot'; try { localStorage.setItem('apocalypse.name', n); } catch (e) {}
+    const mine = { n, s: score, lv: LEVEL, d: Date.now() }; list.push(mine); list.sort((a, b) => b.s - a.s); list.length = Math.min(list.length, SB_N);
+    try { localStorage.setItem('apocalypse.scores', JSON.stringify(list)); } catch (e) {} inp.blur(); board(mine); };
+  const b = el('button', 'SAVE'); b.onclick = save; inp.onkeydown = e => { if (e.key === 'Enter') save(); };
+  P.replaceChildren(el('h2', 'NEW HIGH SCORE'), el('p', score.toLocaleString() + ' points, level ' + LEVEL + '. Your name:'), inp, b);
+}
 function gameOver() { localStorage.setItem('apocalypse.level', LEVEL); localStorage.removeItem('apocalypse.carry'); goLevel(LEVEL); }
 const me = () => mode === 'jeep' ? jeep : heli;
 
@@ -1036,7 +1065,7 @@ const skids = [];
 // (OLD/NEW button under LEVELS while driving; apocalypse.jeepCtl).
 const JEEP_RMIN = 46, JEEP_WMAX = 3.2, JEEP_REV = 0.45, JEEP_GRIP2 = 14, JEEP_GRIP2_OFF = 10;
 let jeepOld = false; try { jeepOld = localStorage.getItem('apocalypse.jeepCtl') === 'old'; } catch (e) {}
-const jctlR = { x: 10, y: 234, w: 74, h: 30 };
+const jctlR = { x: 10, y: 196, w: 74, h: 30 };
 function jeepStep(dt) {
   const j = jeep; j.hurt = Math.max(0, j.hurt - dt); j.crashT = Math.max(0, j.crashT - dt);
   const road = onRoad(j.x, j.y), top = JEEP_V * (road ? 1 : OFFROAD) * (j.fuel > 0 ? 1 : JEEP_CRAWL), now = performance.now();
@@ -2248,11 +2277,7 @@ function draw() {
     g.fillStyle = jeep.cargo.ammo ? '#7d9a3c' : 'rgba(255,255,255,0.18)'; g.fillRect(104, 99, 14, 11);
     if (jeep.cargo.ammo) { g.fillStyle = '#e8d24a'; g.fillRect(108, 103, 6, 3); }
   } else for (let i = 0; i < RKT_MAX; i++) { g.fillStyle = i < rkts ? '#ffd64a' : 'rgba(255,255,255,0.18)'; g.fillRect(82 + i * 14, 99, 10, 11); }
-  // 2.7: BAD = "that last turn felt wrong" (goes in the flight log)
-  g.fillStyle = markT > 0 ? 'rgba(255,90,60,0.85)' : 'rgba(0,0,0,0.45)'; g.fillRect(markR.x, markR.y, markR.w, markR.h);
-  g.strokeStyle = '#ff7a5c'; g.lineWidth = 1.5; g.strokeRect(markR.x + 0.5, markR.y + 0.5, markR.w - 1, markR.h - 1);
-  g.fillStyle = '#ffd9cf'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '700 13px system-ui, sans-serif';
-  g.fillText(markT > 0 ? 'MARKED' : 'BAD', markR.x + markR.w / 2, markR.y + markR.h / 2 + 1); g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
+  // 3.16 (the player 11-11 17:18 "Remove the bad button"): gone; the flight log still records touches.
   g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(lvlR.x, lvlR.y, lvlR.w, lvlR.h);
   g.strokeStyle = '#e8ecd8'; g.lineWidth = 1.5; g.strokeRect(lvlR.x + 0.5, lvlR.y + 0.5, lvlR.w - 1, lvlR.h - 1);
   g.fillStyle = '#e8ecd8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '700 13px system-ui, sans-serif';
@@ -2398,10 +2423,10 @@ function frame(now) {
   draw();
   requestAnimationFrame(frame);
 }
-rec({ e: 'start', v: '3.15', TURN, FAST_K, FACE_DEAD, FACE_RATE, vw, vh, dpr: devicePixelRatio, level: LEVEL, MAXV, DRAG_R, CURVE_LEN, R_NONE, R_FULL });
+rec({ e: 'start', v: '3.16', TURN, FAST_K, FACE_DEAD, FACE_RATE, vw, vh, dpr: devicePixelRatio, level: LEVEL, MAXV, DRAG_R, CURVE_LEN, R_NONE, R_FULL });
 // test hooks (screenshots, scripted checks)
 say('Level ' + LEVEL + ': ' + TH.name + (LEVEL > THEMES.length ? ' (harder)' : ''), 3.5);
-window.rw = { blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
+window.rw = { showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
 window.rwSet = o => { Object.assign(heli, o); if (o.x !== undefined) { cam.x = heli.x; cam.y = heli.y; } flown = turned = !!o.flown; };
 const q = new URLSearchParams(location.search);
 if (q.has('shot')) rwSet({ x: +q.get('x') || PAD.x, y: +q.get('y') || PAD.y, alt: +q.get('alt') || 0, spin: +(q.get('spin') || 0), want: q.get('alt') > 0 ? 1 : 0, hd: +(q.get('hd') || 0), vx: +(q.get('vx') || 0), vy: +(q.get('vy') || 0), flown: q.has('flown') });
