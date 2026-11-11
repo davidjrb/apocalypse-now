@@ -58,7 +58,10 @@ function askFullscreen() {
   if (fsTried || window.AndroidLog || document.fullscreenElement || !document.documentElement.requestFullscreen) return;
   fsTried = true; document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(() => setTimeout(resize, 300)).catch(() => { fsTried = false; });
 }
-document.addEventListener('fullscreenchange', () => setTimeout(resize, 200));
+document.addEventListener('fullscreenchange', () => { setTimeout(resize, 200); if (!document.fullscreenElement) fsTried = false; });   // 3.19: left it = ask again on the next tap
+// 3.19 (the player 11-11 18:27 "why is it still not full screen?"): 3.17 asked on pointerdown, but a TOUCH pointerdown is not
+// a user activation, so touch browsers refused every time. Now asked on pointerup/touchend and on a key press, which are.
+cv.addEventListener('pointerup', askFullscreen); window.addEventListener('touchend', askFullscreen);
 
 // ---------- world ----------
 // 1.2 (the player 23:25 "make the map 10x bigger"): 24000 x 24000, ten times each way. Too big for one canvas, so the
@@ -626,8 +629,89 @@ function stealCandidate() {
   return best;
 }
 function liftNow() { if (mode === 'heli' && heli.want === 0 && fuel > 0 && !dead) heli.want = 1; }
+
+// 3.19 (the player 11-11 18:26 "He says it's a little hard to steer. ... his controller joystick and buttons?"): a game
+// controller (browser Gamepad API) or the keyboard drives the same controls as a thumb. The left stick (or d-pad, WASD,
+// arrows) is a virtual DRAG finger 'pad': stick direction and push = drag direction and length, so the chopper and the
+// jeep fly/drive exactly as with a finger; stick centred = slow to a hover / stop. In the air the nose turns toward the
+// stick; the right stick, when pushed, points the nose instead (aim while flying another way).
+// Buttons: RT or A = gun (held), B or RB = rocket, X = land / take off, hold Y = take the jeep you're next to,
+// Start = pause (LEVELS). A continues on the end screens. Keys: Space gun, R rocket, L land, hold F jeep, P pause, Enter.
+const PAD_DEAD = 0.18, PAD_AIM = 0.4, PAD_IDLE = 1.5;
+const keys = new Set();
+const GAME_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyR', 'KeyL', 'KeyF', 'KeyP', 'Enter']);
+window.addEventListener('keydown', e => {
+  if (e.target && e.target.tagName === 'INPUT') return;
+  if (!GAME_KEYS.has(e.code)) return;
+  e.preventDefault(); keys.add(e.code); askFullscreen();
+});
+window.addEventListener('keyup', e => keys.delete(e.code));
+window.addEventListener('blur', () => keys.clear());
+window.addEventListener('gamepadconnected', () => say('Controller on: left stick flies, A or RT gun, B or RB rocket, X land, hold Y = jeep, Start = pause', 6));
+let padPrev = {}, padYT = 0, padIdle = 0, padGun = false, padPush = false, padAimed = false;
+function padRead() {
+  const s = { lx: 0, ly: 0, rx: 0, ry: 0, b: {} };
+  let gp = null;
+  try { for (const g of (navigator.getGamepads ? navigator.getGamepads() : [])) if (g && g.connected) { gp = g; break; } } catch (e) {}
+  if (gp) {
+    const a = gp.axes, B = i => { const b = gp.buttons[i]; return !!b && (b.pressed || b.value > 0.5); };
+    s.lx = a[0] || 0; s.ly = a[1] || 0; s.rx = a[2] || 0; s.ry = a[3] || 0;
+    const dx = (B(15) ? 1 : 0) - (B(14) ? 1 : 0), dy = (B(13) ? 1 : 0) - (B(12) ? 1 : 0);
+    if (dx || dy) { const n = Math.hypot(dx, dy); s.lx = dx / n; s.ly = dy / n; }
+    s.b.gun = B(7) || B(0); s.b.rkt = B(1) || B(5); s.b.land = B(2); s.b.steal = B(3); s.b.start = B(9); s.b.go = B(0) || B(9);
+  }
+  const k = c => keys.has(c);
+  const kx = (k('KeyD') || k('ArrowRight') ? 1 : 0) - (k('KeyA') || k('ArrowLeft') ? 1 : 0), ky = (k('KeyS') || k('ArrowDown') ? 1 : 0) - (k('KeyW') || k('ArrowUp') ? 1 : 0);
+  if (kx || ky) { const n = Math.hypot(kx, ky); s.lx = kx / n; s.ly = ky / n; }
+  if (k('Space')) s.b.gun = true; if (k('KeyR')) s.b.rkt = true; if (k('KeyL')) s.b.land = true; if (k('KeyF')) s.b.steal = true;
+  if (k('KeyP')) s.b.start = true; if (k('Enter') || k('Space')) s.b.go = true;
+  return s;
+}
+function padStep(dt) {
+  const s = padRead(), pr = padPrev, hit = n => s.b[n] && !pr[n]; padPrev = s.b;
+  if (sbOpen) return;
+  if (hit('start') && !won && !dead) { if (pickOpen) pickOpen = false; else if (!mapBig) { pickOpen = true; padDrop(); } return; }
+  if (pickOpen) return;
+  if (won) { if (hit('go') && won.t > 2) { if (VS) newVersus(); else nextLevel(); } return; }
+  if (dead) { padDrop(); if (hit('go') && dead.t > 3.5) { if (lives === 0) showScores(gameOver); else restart(); } return; }
+  if (mapBig) { if (hit('go')) mapBig = false; return; }
+  // left stick = a drag finger
+  let lx = s.lx, ly = s.ly, m = Math.hypot(lx, ly);
+  if (m > 1) { lx /= m; ly /= m; m = 1; }
+  let f = fingers.get('pad');
+  const pushed = m > PAD_DEAD, push = pushed && !padPush; padPush = pushed;
+  if (pushed) {
+    padIdle = 0;
+    if (!f && ![...fingers.values()].some(o => o.mode === 'dg')) {
+      f = { ox: 0, oy: 0, x: 0, y: 0, t: performance.now(), path: [], mode: 'dg', moved: true, pad: true };
+      fingers.set('pad', f);
+    }
+    if (f && push) liftNow();                       // pushing the stick from centre takes off, like a touch
+    if (f) { const L = 8 + (m - PAD_DEAD) / (1 - PAD_DEAD) * (DRAG_R - 8); f.x = lx / m * L; f.y = ly / m * L; }
+  } else if (f) {
+    f.x = f.y = 0;                                    // centred: slow to a hover / stop, then hand back to touch
+    if (Math.hypot(s.rx, s.ry) <= PAD_AIM) padIdle += dt; if (padIdle > PAD_IDLE) padDrop();
+  }
+  // nose: right stick if pushed, else where the left stick points (air only; the jeep steers itself from the finger)
+  if (mode === 'heli' && heli.alt > 0.35) {
+    const rm = Math.hypot(s.rx, s.ry);
+    if (rm > PAD_AIM) { heli.turnLeft = ang(Math.atan2(s.rx, -s.ry) - heli.hd); padAimed = true; }
+    else if (fingers.get('pad')) { heli.turnLeft = m > PAD_DEAD + 0.1 ? ang(Math.atan2(lx, -ly) - heli.hd) : 0; padAimed = false; }
+    else if (padAimed) { heli.turnLeft = 0; padAimed = false; }
+  }
+  // buttons
+  if (s.b.gun && !pr.gun) { padGun = true; gunOn = true; }
+  if (!s.b.gun && pr.gun && padGun) { padGun = false; gunOn = gunLatch; }
+  if (hit('rkt')) fireRocket();
+  if (hit('land')) toggleLand();
+  if (s.b.steal) {
+    padYT += dt;
+    if (padYT >= JEEP_HOLD / 1000 && padYT - dt < JEEP_HOLD / 1000 && mode === 'heli') { const t = stealCandidate(); if (t) holdJeep(t); else say('Get next to a jeep and slow down, then hold Y'); }
+  } else padYT = 0;
+}
+function padDrop() { if (fingers.delete('pad')) { heli.turnLeft = 0; heli.yawRate = 0; } padIdle = 0; }
 cv.addEventListener('pointerdown', e => {
-  askFullscreen();   // 3.17
+  if (e.pointerType === 'mouse') askFullscreen();   // 3.17; touch asks on pointerup (3.19)
   cv.setPointerCapture(e.pointerId);
   rec({ e: 'd', id: e.pointerId, x: r1(e.clientX), y: r1(e.clientY), hd: r3(heli.hd), vx: r1(heli.vx), vy: r1(heli.vy), alt: r3(heli.alt), mode });
   if (pickOpen) {
@@ -2587,17 +2671,18 @@ function wrapText(g, text, x, y, maxW, lh) {
 
 function frame(now) {
   const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000)); last = now;
+  padStep(dt);   // 3.19
   if (won) { won.t += dt; T += dt; } else if (!mapBig && !pickOpen) { step(dt); stepFauna(dt); }
   if (fingers.size || heli.turnLeft || heli.yawRate) rec({ e: 'f', dt: r3(dt), hd: r3(heli.hd), yr: r3(heli.yawRate || 0), tl: r3(heli.turnLeft || 0), vx: r1(heli.vx), vy: r1(heli.vy), alt: r3(heli.alt), n: fingers.size });
   markT = Math.max(0, markT - dt);
   draw();
   requestAnimationFrame(frame);
 }
-rec({ e: 'start', v: '3.18', versus: VS ? VS.seed : 0, TURN, FAST_K, FACE_DEAD, FACE_RATE, vw, vh, dpr: devicePixelRatio, level: LEVEL, MAXV, DRAG_R, CURVE_LEN, R_NONE, R_FULL });
+rec({ e: 'start', v: '3.19', versus: VS ? VS.seed : 0, TURN, FAST_K, FACE_DEAD, FACE_RATE, vw, vh, dpr: devicePixelRatio, level: LEVEL, MAXV, DRAG_R, CURVE_LEN, R_NONE, R_FULL });
 // test hooks (screenshots, scripted checks)
 if (VS) { foeSpawn(); say('VERSUS on ' + TH.name + ': bring their red flag to your pad. First to ' + VS_WIN, 5); }
 else say('Level ' + LEVEL + ': ' + TH.name + (LEVEL > THEMES.length ? ' (harder)' : ''), 3.5);
-window.rw = { VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
+window.rw = { padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
 window.rwSet = o => { Object.assign(heli, o); if (o.x !== undefined) { cam.x = heli.x; cam.y = heli.y; } flown = turned = !!o.flown; };
 const q = new URLSearchParams(location.search);
 if (q.has('shot')) rwSet({ x: +q.get('x') || PAD.x, y: +q.get('y') || PAD.y, alt: +q.get('alt') || 0, spin: +(q.get('spin') || 0), want: q.get('alt') > 0 ? 1 : 0, hd: +(q.get('hd') || 0), vx: +(q.get('vx') || 0), vy: +(q.get('vy') || 0), flown: q.has('flown') });
