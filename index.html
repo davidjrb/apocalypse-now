@@ -259,8 +259,9 @@ function paintTile(i, j) {
   // every level (3.2 only thinned them). The ground gets a fine fleck texture instead: short strokes, no circles.
   const greens = TH.blobs, r = rng(hash(i, j, 5));
   g.globalAlpha = 0.55; g.lineWidth = 2; g.lineCap = 'round';
-  for (let k = 0; k < 1400; k++) { const x = x0 + r() * TILE, y = y0 + r() * TILE, a = r() * 6.28, l = 2 + r() * 4;
-    g.strokeStyle = greens[k % 5]; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+  const fl = [[], [], [], [], []];
+  for (let k = 0; k < 1400; k++) { const x = x0 + r() * TILE, y = y0 + r() * TILE, a = r() * 6.28, l = 2 + r() * 4; fl[k % 5].push(x, y, x + Math.cos(a) * l, y + Math.sin(a) * l); }
+  for (let c = 0; c < 5; c++) { const P = fl[c]; g.strokeStyle = greens[c]; g.beginPath(); for (let k = 0; k < P.length; k += 4) { g.moveTo(P[k], P[k + 1]); g.lineTo(P[k + 2], P[k + 3]); } g.stroke(); }   // 3.15: 5 strokes, not 1400
   g.globalAlpha = 1;
   for (const f of fieldG.query(x0, y0, x1, y1)) {
     g.save(); g.translate(f.x, f.y); g.rotate(f.rot);
@@ -330,30 +331,53 @@ function star(g, x, y, n, ro, ri, a0) { g.beginPath(); for (let k = 0; k < n * 2
 // stacked discs with a shiny highlight. Now a crown from above: a lumpy outline of overlapping lobes, darker underneath,
 // lit lobes on the upper left, leaf speckle, no gloss; greens and sizes vary per tree and some Valley trees are conifers.
 const CROWN_GREENS = [['#27421a', '#3a5f25', '#557d34'], ['#30401a', '#4a5a24', '#6b7a35'], ['#1f3d2a', '#2f5a3c', '#4a7a50'], ['#2d4a1e', '#45692c', '#62873c']];
-function crownLobes(x, y, r) {
-  const q = rng(hash(x | 0, y | 0, 31)), n = 6 + (q() * 4 | 0), out = [[x, y, r * 0.58]];
-  for (let k = 0; k < n; k++) { const a = k * 6.283 / n + q() * 0.5, d = r * (0.42 + q() * 0.2); out.push([x + Math.cos(a) * d, y + Math.sin(a) * d, r * (0.36 + q() * 0.2)]); }
+// 3.15 (the player 11-11 17:12 "It didn't become choppy until today's first update"): he was right. Painting a new patch
+// of ground went from ~24 ms (3.3, Jungle) to ~72 ms (3.14): 3.7's 1400 single strokes per tile and 3.10's lobed trees
+// drawn path by path. Same look, cheaper: each tree is drawn ONCE per (style, palette, size, variant) into a small
+// sprite and stamped after that; its lobed shadow likewise; the ground flecks go out in 5 batched strokes, not 1400.
+const TREE_VARS = 8, treeSprites = new Map();
+function crownLobes(seed, r) {
+  const q = rng(seed), n = 6 + (q() * 4 | 0), out = [[0, 0, r * 0.58]];
+  for (let k = 0; k < n; k++) { const a = k * 6.283 / n + q() * 0.5, d = r * (0.42 + q() * 0.2); out.push([Math.cos(a) * d, Math.sin(a) * d, r * (0.36 + q() * 0.2)]); }
   return out;
 }
-function drawCrown(g, x, y, r, L) {
-  const lobes = crownLobes(x, y, r), q = rng(hash(x | 0, y | 0, 57));
-  g.fillStyle = L[0]; g.beginPath(); for (const [u, v, w] of lobes) { g.moveTo(u + w, v); g.arc(u, v, w, 0, 7); } g.fill();
-  g.fillStyle = L[1]; g.beginPath(); for (const [u, v, w] of lobes) { const uu = u - r * 0.1, vv = v - r * 0.1; g.moveTo(uu + w * 0.78, vv); g.arc(uu, vv, w * 0.78, 0, 7); } g.fill();
-  g.fillStyle = L[2]; g.beginPath(); for (const [u, v, w] of lobes) if (u + v < x + y - r * 0.15) { const uu = u - r * 0.14, vv = v - r * 0.14; g.moveTo(uu + w * 0.45, vv); g.arc(uu, vv, w * 0.45, 0, 7); } g.fill();
+function drawCrown(g, x, y, r, L, seed) {
+  const lobes = crownLobes(seed, r), q = rng(seed * 7 + 3);
+  g.fillStyle = L[0]; g.beginPath(); for (const [u, v, w] of lobes) { g.moveTo(x + u + w, y + v); g.arc(x + u, y + v, w, 0, 7); } g.fill();
+  g.fillStyle = L[1]; g.beginPath(); for (const [u, v, w] of lobes) { const uu = x + u - r * 0.1, vv = y + v - r * 0.1; g.moveTo(uu + w * 0.78, vv); g.arc(uu, vv, w * 0.78, 0, 7); } g.fill();
+  g.fillStyle = L[2]; g.beginPath(); for (const [u, v, w] of lobes) if (u + v < -r * 0.15) { const uu = x + u - r * 0.14, vv = y + v - r * 0.14; g.moveTo(uu + w * 0.45, vv); g.arc(uu, vv, w * 0.45, 0, 7); } g.fill();
   for (let k = 0; k < 14; k++) { const a = q() * 6.283, d = q() * r * 0.85; g.fillStyle = k % 3 ? 'rgba(10,30,5,0.35)' : 'rgba(150,190,90,0.35)';
     g.beginPath(); g.arc(x + Math.cos(a) * d, y + Math.sin(a) * d, r * (0.06 + q() * 0.06), 0, 7); g.fill(); }
 }
-function drawConifer(g, x, y, r, L) {
-  const a0 = (x * 0.37 + y * 0.11) % 6.28;
+function drawConifer(g, x, y, r, L, a0) {
   g.fillStyle = L[0]; star(g, x, y, 9, r * 0.9, r * 0.55, a0);
   g.fillStyle = L[1]; star(g, x - r * 0.06, y - r * 0.06, 8, r * 0.62, r * 0.36, a0 + 0.2);
   g.fillStyle = L[2]; star(g, x - r * 0.12, y - r * 0.12, 6, r * 0.32, r * 0.16, a0 + 0.4);
 }
-const crownCols = (x, y) => CROWN_GREENS[(hash(x | 0, y | 0, 13) >>> 0) % CROWN_GREENS.length];
+const crownPal = (x, y) => (hash(x | 0, y | 0, 13) >>> 0) % CROWN_GREENS.length;
+const treeVar = (x, y) => (hash(x | 0, y | 0, 31) >>> 0) % TREE_VARS;
 const isConifer = (x, y) => TH.tree === 'round' && (hash(x | 0, y | 0, 19) >>> 0) % 6 === 0;
+// a tree (or its shadow) drawn once into a little canvas, centred, then stamped
+function treeSprite(kind, pal, rb, vr) {
+  const key = kind + pal + '|' + rb + '|' + vr; let c = treeSprites.get(key); if (c) return c;
+  const S = Math.ceil(rb * 2.6) + 4, h = S / 2; c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d'), L = TH.tree === 'jungle' ? TH.leaf : CROWN_GREENS[pal], seed = 1000 + vr * 97 + rb;
+  if (kind === 'S') { g.fillStyle = '#000'; g.beginPath(); for (const [u, v, w] of crownLobes(seed, rb)) { g.moveTo(h + u + w, h + v); g.arc(h + u, h + v, w, 0, 7); } g.fill(); }
+  else if (kind === 'P') drawConifer(g, h, h, rb, CROWN_GREENS[pal], vr * 0.785);
+  else {
+    drawCrown(g, h, h, rb, L, seed);
+    if (TH.tree === 'jungle') {                // 3.2: big pointed fronds poking out of the canopy
+      g.fillStyle = TH.leaf[3]; const a0 = vr * 0.785;
+      for (let k = 0; k < 5; k++) { const a = a0 + k * 1.257, d = rb * 0.75;
+        g.save(); g.translate(h + Math.cos(a) * d, h + Math.sin(a) * d); g.rotate(a); g.beginPath(); g.moveTo(-rb * 0.35, -rb * 0.16); g.quadraticCurveTo(rb * 0.25, -rb * 0.2, rb * 0.55, 0); g.quadraticCurveTo(rb * 0.25, rb * 0.2, -rb * 0.35, rb * 0.16); g.fill(); g.restore(); }
+    }
+  }
+  treeSprites.set(key, c); return c;
+}
+function stamp(g, c, x, y) { g.drawImage(c, x - c.width / 2, y - c.height / 2); }
 function treeShadow(g, x, y, r) {
-  if (TH.tree === 'round' || TH.tree === 'jungle') { const k = TH.tree === 'jungle' ? 1.3 : 1; g.beginPath();
-    for (const [u, v, w] of crownLobes(x, y, r * k)) { g.moveTo(u + r * 0.45 + w, v + r * 0.45); g.arc(u + r * 0.45, v + r * 0.45, w, 0, 7); } g.fill(); }
+  if (TH.tree === 'round' || TH.tree === 'jungle') { const rr = Math.round(r * (TH.tree === 'jungle' ? 1.3 : 1));
+    g.save(); g.globalAlpha = 0.3; stamp(g, treeSprite('S', 0, rr, treeVar(x, y)), x + r * 0.45, y + r * 0.45); g.restore(); }
   else { g.beginPath(); g.arc(x + r * 0.45, y + r * 0.45, r, 0, 7); g.fill(); }
 }
 function drawTree(g, x, y, r) {
@@ -389,14 +413,8 @@ function drawTree(g, x, y, r) {
     g.fillStyle = L[3]; g.beginPath(); g.arc(x, y, r * 0.42, 0, 7); g.fill();
     g.fillStyle = L[4]; g.beginPath(); g.arc(x - r * 0.12, y - r * 0.12, r * 0.14, 0, 7); g.fill();
   } else {
-    const k = TH.tree === 'jungle' ? 1.3 : 1, rr = r * k;
-    if (isConifer(x, y)) drawConifer(g, x, y, rr, crownCols(x, y));
-    else drawCrown(g, x, y, rr, TH.tree === 'jungle' ? L : crownCols(x, y));
-    if (TH.tree === 'jungle') {                // 3.2: big pointed fronds poking out of the canopy
-      g.fillStyle = L[3];
-      for (let k = 0; k < 5; k++) { const a = a0 + k * 1.257, d = rr * 0.75;
-        g.save(); g.translate(x + Math.cos(a) * d, y + Math.sin(a) * d); g.rotate(a); g.beginPath(); g.moveTo(-rr * 0.35, -rr * 0.16); g.quadraticCurveTo(rr * 0.25, -rr * 0.2, rr * 0.55, 0); g.quadraticCurveTo(rr * 0.25, rr * 0.2, -rr * 0.35, rr * 0.16); g.fill(); g.restore(); }
-    }
+    const rr = Math.round(r * (TH.tree === 'jungle' ? 1.3 : 1)), pal = crownPal(x, y), vr = treeVar(x, y);   // 3.15: stamped sprites
+    stamp(g, treeSprite(isConifer(x, y) ? 'P' : 'C', pal, rr, vr), x, y);
   }
 }
 function paintBase(g, b) {
@@ -2380,7 +2398,7 @@ function frame(now) {
   draw();
   requestAnimationFrame(frame);
 }
-rec({ e: 'start', v: '3.14', TURN, FAST_K, FACE_DEAD, FACE_RATE, vw, vh, dpr: devicePixelRatio, level: LEVEL, MAXV, DRAG_R, CURVE_LEN, R_NONE, R_FULL });
+rec({ e: 'start', v: '3.15', TURN, FAST_K, FACE_DEAD, FACE_RATE, vw, vh, dpr: devicePixelRatio, level: LEVEL, MAXV, DRAG_R, CURVE_LEN, R_NONE, R_FULL });
 // test hooks (screenshots, scripted checks)
 say('Level ' + LEVEL + ': ' + TH.name + (LEVEL > THEMES.length ? ' (harder)' : ''), 3.5);
 window.rw = { blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
