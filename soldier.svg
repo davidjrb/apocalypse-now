@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 360">
+  <!-- Apocalypse Now! game-over taunt: an original cartoon enemy soldier, laughing and pointing. -->
+  <defs>
+    <radialGradient id="face" cx="45%" cy="40%" r="65%">
+      <stop offset="0" stop-color="#f1c797"/><stop offset="1" stop-color="#c98f5e"/>
+    </radialGradient>
+    <linearGradient id="cloth" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6b7a3c"/><stop offset="1" stop-color="#3f4a22"/>
+    </linearGradient>
+    <radialGradient id="helm" cx="40%" cy="30%" r="75%">
+      <stop offset="0" stop-color="#8a9a52"/><stop offset="1" stop-color="#46522a"/>
+    </radialGradient>
+  </defs>
+  <!-- shoulders and chest -->
+  <path d="M30 360 C34 290 70 262 150 258 C230 262 266 290 270 360 Z" fill="url(#cloth)" stroke="#232912" stroke-width="4"/>
+  <path d="M118 262 L150 300 L182 262" fill="none" stroke="#2c3418" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M62 300 L220 360" stroke="#5a4426" stroke-width="16"/>
+  <g fill="#c9a24a" stroke="#5a4426" stroke-width="2">
+    <rect x="96" y="314" width="12" height="18" rx="3" transform="rotate(20 102 323)"/>
+    <rect x="124" y="324" width="12" height="18" rx="3" transform="rotate(20 130 333)"/>
+    <rect x="152" y="334" width="12" height="18" rx="3" transform="rotate(20 158 343)"/>
+  </g>
+  <!-- neck -->
+  <rect x="128" y="226" width="44" height="40" rx="10" fill="#c98f5e" stroke="#7a4f2c" stroke-width="3"/>
+  <!-- ears -->
+  <ellipse cx="72" cy="168" rx="15" ry="22" fill="#d9a372" stroke="#7a4f2c" stroke-width="3"/>
+  <ellipse cx="228" cy="168" rx="15" ry="22" fill="#d9a372" stroke="#7a4f2c" stroke-width="3"/>
+  <!-- head -->
+  <path d="M78 150 C78 98 112 82 150 82 C188 82 222 98 222 150 C222 205 192 244 150 244 C108 244 78 205 78 150 Z" fill="url(#face)" stroke="#7a4f2c" stroke-width="4"/>
+  <!-- cheeks -->
+  <ellipse cx="103" cy="182" rx="15" ry="9" fill="#e5765a" opacity="0.45"/>
+  <ellipse cx="197" cy="182" rx="15" ry="9" fill="#e5765a" opacity="0.45"/>
+  <!-- raised eyebrows -->
+  <path d="M96 126 Q114 112 132 124" fill="none" stroke="#2b1d12" stroke-width="7" stroke-linecap="round"/>
+  <path d="M168 124 Q186 112 204 126" fill="none" stroke="#2b1d12" stroke-width="7" stroke-linecap="round"/>
+  <!-- eyes squeezed shut with laughter -->
+  <path d="M100 150 Q115 136 130 150" fill="none" stroke="#2b1d12" stroke-width="6" stroke-linecap="round"/>
+  <path d="M170 150 Q185 136 200 150" fill="none" stroke="#2b1d12" stroke-width="6" stroke-linecap="round"/>
+  <!-- tears of laughter -->
+  <path d="M96 156 q-6 12 0 16 q6 -4 0 -16 Z" fill="#9fd4ff" stroke="#3f7fb0" stroke-width="1.5"/>
+  <path d="M204 156 q-6 12 0 16 q6 -4 0 -16 Z" fill="#9fd4ff" stroke="#3f7fb0" stroke-width="1.5"/>
+  <!-- nose -->
+  <path d="M150 150 Q142 172 138 176 Q150 182 160 176" fill="none" stroke="#9a6640" stroke-width="4" stroke-linecap="round"/>
+  <!-- big laughing mouth -->
+  <path d="M106 190 Q150 186 194 190 Q190 238 150 238 Q110 238 106 190 Z" fill="#5a1414" stroke="#2b1d12" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M110 192 Q150 189 190 192 L188 203 Q150 199 112 203 Z" fill="#fffaf0"/>
+  <path d="M124 228 Q150 214 176 228 Q164 237 150 237 Q136 237 124 228 Z" fill="#e0505a"/>
+  <!-- helmet -->
+  <path d="M60 128 C60 62 104 34 150 34 C196 34 240 62 240 128 Z" fill="url(#helm)" stroke="#232912" stroke-width="4"/>
+  <path d="M48 128 Q150 112 252 128 Q256 140 246 142 Q150 128 54 142 Q44 140 48 128 Z" fill="#3f4a22" stroke="#232912" stroke-width="3"/>
+  <path d="M104 52 Q150 40 196 52" fill="none" stroke="#a7b56a" stroke-width="5" stroke-linecap="round" opacity="0.6"/>
+  <polygon points="150,64 157,84 178,84 161,96 167,116 150,104 133,116 139,96 122,84 143,84" fill="#d8322a" stroke="#7a1410" stroke-width="2"/>
+  <!-- chin strap -->
+  <path d="M74 142 Q84 218 112 236" fill="none" stroke="#3a2a18" stroke-width="4"/>
+  <path d="M226 142 Q216 218 188 236" fill="none" stroke="#3a2a18" stroke-width="4"/>
+  <!-- pointing hand, toward the viewer -->
+  <g transform="translate(228 286) rotate(-18)">
+    <path d="M-34 74 L-30 20 L24 20 L28 74 Z" fill="url(#cloth)" stroke="#232912" stroke-width="4"/>
+    <rect x="-26" y="-14" width="48" height="40" rx="14" fill="#d9a372" stroke="#7a4f2c" stroke-width="3.5"/>
+    <rect x="-8" y="-52" width="18" height="46" rx="9" fill="#e2ad7c" stroke="#7a4f2c" stroke-width="3.5"/>
+    <path d="M-20 0 h36 M-20 12 h36" stroke="#9a6640" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M-26 6 Q-40 -4 -32 -16 Q-22 -16 -18 -4" fill="#d9a372" stroke="#7a4f2c" stroke-width="3.5"/>
+  </g>
+</svg>
