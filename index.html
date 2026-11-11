@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Apocalypse Now!</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<meta name="theme-color" content="#1F2A17">
 <style>
   html, body { margin: 0; height: 100%; background: #1F2A17; overflow: hidden; }
   canvas { display: block; width: 100vw; height: 100vh; touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -40,12 +43,22 @@
 const W = 24000, H = 24000;                       // world size in px (1.2: ten times 0.x's 2400 each way)
 const cv = document.getElementById('c'), cx = cv.getContext('2d');
 let vw = 0, vh = 0, dpr = 1;
+// 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
+// covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
+// we don't force it again). manifest.json lets Firefox's menu add it to the home screen as a full-screen app.
 function resize() {
   dpr = Math.min(window.devicePixelRatio || 1, 3);
-  vw = window.innerWidth; vh = window.innerHeight;
-  cv.width = Math.round(vw * dpr); cv.height = Math.round(vh * dpr);
+  const V = window.visualViewport;
+  vw = Math.round(V ? V.width : window.innerWidth); vh = Math.round(V ? V.height : window.innerHeight);
+  cv.width = Math.round(vw * dpr); cv.height = Math.round(vh * dpr); cv.style.width = vw + 'px'; cv.style.height = vh + 'px';
 }
-window.addEventListener('resize', resize); resize();
+window.addEventListener('resize', resize); if (window.visualViewport) window.visualViewport.addEventListener('resize', resize); resize();
+let fsTried = false;
+function askFullscreen() {
+  if (fsTried || window.AndroidLog || document.fullscreenElement || !document.documentElement.requestFullscreen) return;
+  fsTried = true; document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(() => setTimeout(resize, 300)).catch(() => { fsTried = false; });
+}
+document.addEventListener('fullscreenchange', () => setTimeout(resize, 200));
 
 // ---------- world ----------
 // 1.2 (the player 23:25 "make the map 10x bigger"): 24000 x 24000, ten times each way. Too big for one canvas, so the
@@ -600,6 +613,7 @@ function stealCandidate() {
 }
 function liftNow() { if (mode === 'heli' && heli.want === 0 && fuel > 0 && !dead) heli.want = 1; }
 cv.addEventListener('pointerdown', e => {
+  askFullscreen();   // 3.17
   cv.setPointerCapture(e.pointerId);
   rec({ e: 'd', id: e.pointerId, x: r1(e.clientX), y: r1(e.clientY), hd: r3(heli.hd), vx: r1(heli.vx), vy: r1(heli.vy), alt: r3(heli.alt), mode });
   if (pickOpen) {
@@ -2423,7 +2437,7 @@ function frame(now) {
   draw();
   requestAnimationFrame(frame);
 }
-rec({ e: 'start', v: '3.16', TURN, FAST_K, FACE_DEAD, FACE_RATE, vw, vh, dpr: devicePixelRatio, level: LEVEL, MAXV, DRAG_R, CURVE_LEN, R_NONE, R_FULL });
+rec({ e: 'start', v: '3.17', TURN, FAST_K, FACE_DEAD, FACE_RATE, vw, vh, dpr: devicePixelRatio, level: LEVEL, MAXV, DRAG_R, CURVE_LEN, R_NONE, R_FULL });
 // test hooks (screenshots, scripted checks)
 say('Level ' + LEVEL + ': ' + TH.name + (LEVEL > THEMES.length ? ' (harder)' : ''), 3.5);
 window.rw = { showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
