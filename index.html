@@ -55,7 +55,7 @@ let QUAL = window.AndroidLog || / wv\)/.test(navigator.userAgent) ? 3 : 1.75; co
 let fpsAcc = 0, fpsN = 0, fpsShow = 0, fpsT0 = 0;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.30';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.31';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -612,6 +612,7 @@ function placeButtons() {
     const b = btn[k], x = def[k][0], y = def[k][1];
     b.x = Math.max(b.r + 4, Math.min(vw - b.r - 4, x)); b.y = S ? y : Math.max(b.r + 120, Math.min(vh - b.r - 4, y));
   }
+  if (S) [btn.rkt.x, btn.rkt.y] = centreOf('rkt');   // 3.31: top left by default, or where he put it
 }
 // Two control schemes, switched by the button at the top (0.3, so the player can feel both):
 //   FLICK  flick to set off, it coasts at that speed; flick back / hold still to stop; hold+circle or twist to turn.
@@ -628,9 +629,44 @@ const miniR = { x: 0, y: 12, s: 96 };
 // 3.29 (the player 23:17 + 23:18 "a way my right index finger can fire a missile", 23:19 "double tapping fly lands"): sideways
 // there is no GUN or LAND button: double-tap the AIM stick = gun on/off, double-tap the FLY stick = land. ROCKET sits in
 // the top right corner, and the whole corner (RKT_ZONE) is its button, so the index finger finds it while the thumb aims.
-const RKT_ZONE = () => ({ x: vw - 170, y: 0, w: 170, h: Math.max(120, vh * 0.3) });
+const RKT_ZONE = () => ({ x: 0, y: 0, w: 170, h: Math.max(120, vh * 0.3) });
+// 3.31 (the player 11-12 00:25 "for the rockets button let's implement the old... when you hold it down you can relocate it";
+// 00:29 "Swap default location of minimap with rockets again please. Also holding minimap moves it. Other stationary
+// (missile/minimap) button yields to the other one being moved"): 1.7's hold-to-move, sideways only, for ROCKET and the
+// minimap. Defaults: minimap top RIGHT, ROCKET top LEFT (the whole top-left corner is its button until it is moved).
+// Hold either one HOLD_MOVE ms without sliding (a ring fills), drag it anywhere, let go = it stays (centres as fractions
+// of the screen in apocalypse.pos.side). A tap still fires / opens the map. If the dragged one comes near the other, the
+// other jumps out of the way (to the dragged one's old place, else a default/corner that is clear). Moved ROCKET = a
+// generous circle (RKT_HIT). RESET POSITIONS on the big map restores the defaults.
+// "Technically the joysticks can be invisible. Have that option in the minimap menu": STICKS SHOWN/HIDDEN on the big map
+// (apocalypse.sticks); hidden = no FLY/AIM rings drawn, the sticks still work where the thumb lands; gun on shows by the strip.
+const HOLD_MOVE = 600, RKT_HIT = 58, MOVE_GAP = 112, MINI_S = 96;
+let pos = {}, sticksHidden = false, mv = null;   // mv: { k: 'rkt'|'mini', id, x0, y0, t0, lifted, cancel, home }
+try { pos = (JSON.parse(localStorage.getItem('apocalypse.pos') || '{}') || {}).side || {}; sticksHidden = localStorage.getItem('apocalypse.sticks') === 'hidden'; } catch (e) { pos = {}; }
+const savePos = () => { try { localStorage.setItem('apocalypse.pos', JSON.stringify({ side: pos })); } catch (e) {} };
+const stR = { x: 10, y: 234, w: 154, h: 30 }, rstR = { x: 10, y: 272, w: 154, h: 30 };
+const defC = k => k === 'rkt' ? [44, 44] : [vw - 12 - MINI_S / 2, 12 + MINI_S / 2];
+function centreOf(k) {
+  const m = k === 'rkt' ? btn.rkt.r + 4 : MINI_S / 2 + 4, f = pos[k];
+  if (!f) return defC(k);
+  return [Math.max(m, Math.min(vw - m, f[0] * vw)), Math.max(m, Math.min(vh - m - (k === 'mini' ? 14 : 0), f[1] * vh))];
+}
+function yieldFrom(k) {   // the other one gets out of the way of the one being dragged
+  const o = k === 'rkt' ? 'mini' : 'rkt', A = centreOf(k), B = centreOf(o), far = c => Math.hypot(c[0] - A[0], c[1] - A[1]) >= MOVE_GAP;
+  if (far(B)) return;
+  const c = [mv.home, defC(o), defC(k), [44, vh / 2], [vw - 60, vh / 2], [vw / 2, 60]].find(far);
+  if (c) pos[o] = [c[0] / vw, c[1] / vh];
+}
+function moveHoldStep() {
+  if (!mv || mv.lifted || mv.cancel || !sticksOn()) return;
+  if (performance.now() - mv.t0 >= HOLD_MOVE) { mv.lifted = true; say(mv.k === 'rkt' ? 'Drag ROCKET where you want it, then let go' : 'Drag the map where you want it, then let go', 2); }
+}
 const onBtn = (x, y) => {
-  if (sticksOn()) { const z = RKT_ZONE(); return mode === 'heli' && x >= z.x && y >= z.y && y <= z.y + z.h ? btn.rkt : null; }
+  if (sticksOn()) {
+    if (mode !== 'heli') return null;
+    if (pos.rkt) return Math.hypot(x - btn.rkt.x, y - btn.rkt.y) < RKT_HIT ? btn.rkt : null;
+    const z = RKT_ZONE(); return x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h ? btn.rkt : null;
+  }
   return Object.values(btn).find(b => (mode === 'heli' || b === btn.gun) && b !== btn.land && Math.hypot(x - b.x, y - b.y) < b.r + 10);
 };
 
@@ -763,18 +799,23 @@ cv.addEventListener('pointerdown', e => {
   if (!won && mapBig && e.clientX >= lvlR.x && e.clientX <= lvlR.x + lvlR.w && e.clientY >= lvlR.y && e.clientY <= lvlR.y + lvlR.h) {
     pickOpen = true; mapBig = false; fingers.clear(); for (const k of Object.values(btn)) k.down = null; gunOn = gunLatch; return;
   }
+  const inR = r => e.clientX >= r.x && e.clientX <= r.x + r.w && e.clientY >= r.y && e.clientY <= r.y + r.h;   // 3.31
+  if (!won && mapBig && sticksOn() && inR(stR)) { sticksHidden = !sticksHidden; try { localStorage.setItem('apocalypse.sticks', sticksHidden ? 'hidden' : 'shown'); } catch (e) {} return; }
+  if (!won && mapBig && sticksOn() && inR(rstR)) { pos = {}; savePos(); say('ROCKET and map back in their corners', 1.5); return; }
   if (!won && mapBig && !dead && e.clientX >= vsR.x && e.clientX <= vsR.x + vsR.w && e.clientY >= vsR.y && e.clientY <= vsR.y + vsR.h) { newVersus(); return; }   // 3.18
   if (won) { if (won.t > 2) { if (VS) newVersus(); else nextLevel(); } return; }
   if (dead) { if (dead.t > 3.5) { if (lives === 0) showScores(gameOver); else restart(); } return; }
   // 2.2: tap the minimap = the whole map (the game waits); tap again to close
   if (mapBig) { mapBig = false; return; }
   if (e.clientX > miniR.x - 8 && e.clientX < miniR.x + miniR.s + 8 && e.clientY > miniR.y - 8 && e.clientY < miniR.y + miniR.s + 8) {
+    if (sticksOn()) { if (!mv) mv = { k: 'mini', id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now(), lifted: false, cancel: false, home: centreOf('mini') }; return; }   // 3.31: tap opens on let go, hold moves
     mapBig = true; fingers.clear(); for (const k of Object.values(btn)) k.down = null; gunOn = gunLatch; return;
   }
   const b = onBtn(e.clientX, e.clientY);
   if (b) {
     if (b.down !== null) return;
     b.down = e.pointerId; b.t0 = performance.now();
+    if (b === btn.rkt && sticksOn() && !mv) mv = { k: 'rkt', id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: b.t0, lifted: false, cancel: false, home: centreOf('rkt') };   // 3.31
     if (b === btn.gun) gunOn = true; else if (b === btn.land) toggleLand(); else fireRocket();
     return;
   }
@@ -807,6 +848,11 @@ cv.addEventListener('pointerdown', e => {
   if (fingers.size === 2) { const [a, c] = [...fingers.values()]; twist = Math.atan2(c.y - a.y, c.x - a.x); a.mode = c.mode = 'twist'; }
 });
 cv.addEventListener('pointermove', e => {
+  if (mv && mv.id === e.pointerId) {   // 3.31: ROCKET / minimap being held or dragged
+    if (mv.lifted) { pos[mv.k] = [Math.max(0, Math.min(1, e.clientX / vw)), Math.max(0, Math.min(1, e.clientY / vh))]; yieldFrom(mv.k); }
+    else if (Math.hypot(e.clientX - mv.x0, e.clientY - mv.y0) > 16) mv.cancel = true;
+    return;
+  }
   const f = fingers.get(e.pointerId); if (!f) return;
   rec({ e: 'm', id: e.pointerId, x: r1(e.clientX), y: r1(e.clientY) });
   const now = performance.now(); f.x = e.clientX; f.y = e.clientY; f.path.push([f.x, f.y, now]);
@@ -830,6 +876,12 @@ cv.addEventListener('pointermove', e => {
 });
 function up(e) {
   rec({ e: 'u', id: e.pointerId, x: r1(e.clientX), y: r1(e.clientY), c: e.type === 'pointercancel' ? 1 : undefined });
+  if (mv && mv.id === e.pointerId) {   // 3.31
+    const m = mv; mv = null;
+    if (m.lifted) { savePos(); say(m.k === 'rkt' ? 'ROCKET stays here' : 'Map stays here', 1.2); }
+    else if (m.k === 'mini' && !m.cancel && !dead && !won) { mapBig = true; fingers.clear(); for (const k of Object.values(btn)) k.down = null; gunOn = gunLatch; }
+    if (m.k === 'mini') return;
+  }
   // 1.9 (the player 18:15): GUN held = fires while held; a quick tap switches it on (stays on), another tap switches it off
   for (const b of Object.values(btn)) if (b.down === e.pointerId) {
     b.down = null;
@@ -2497,6 +2549,7 @@ function drawHudStrip(g) {
     g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(x, y, seg, 5);
     g.fillStyle = low ? '#ff3a2a' : col; g.fillRect(x, y, seg * Math.max(0, Math.min(1, v)), 5);
   });
+  if (sticksHidden && gunLatch && mode === 'heli') { g.globalAlpha = 0.95; g.font = '800 11px system-ui, sans-serif'; g.textAlign = 'left'; g.fillStyle = '#ffb347'; g.fillText('GUN ON', x0 + w + 12, y + 5); }   // 3.31: no AIM ring to glow
   if (VS) { g.globalAlpha = 0.85; g.font = '700 12px system-ui, sans-serif'; g.textAlign = 'center'; g.fillStyle = '#7ab8ff'; g.fillText('YOU ' + vs.me, vw / 2 - 30, y - 14); g.fillStyle = '#ff7a6a'; g.fillText(vs.foe + ' THEM', vw / 2 + 30, y - 14); }
   g.globalAlpha = 1; g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
 }
@@ -2531,6 +2584,11 @@ function drawReadout(g) {   // the old full panel + LEVELS / VERSUS / jeep switc
   g.fillStyle = VS ? 'rgba(120,20,10,0.6)' : 'rgba(0,0,0,0.45)'; g.fillRect(vsR.x, vsR.y, vsR.w, vsR.h);   // 3.18
   g.strokeStyle = VS ? '#ff7a6a' : '#e8ecd8'; g.strokeRect(vsR.x + 0.5, vsR.y + 0.5, vsR.w - 1, vsR.h - 1);
   g.fillStyle = VS ? '#ffd0c8' : '#e8ecd8'; g.fillText(VS ? 'NEW MAP' : 'VERSUS', vsR.x + vsR.w / 2, vsR.y + vsR.h / 2 + 1); g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
+  if (sticksOn()) for (const [r, t] of [[stR, sticksHidden ? 'STICKS: HIDDEN' : 'STICKS: SHOWN'], [rstR, 'RESET POSITIONS']]) {   // 3.31
+    g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(r.x, r.y, r.w, r.h); g.strokeStyle = '#e8ecd8'; g.lineWidth = 1.5; g.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+    g.fillStyle = r === rstR && !pos.rkt && !pos.mini ? 'rgba(232,236,216,0.45)' : '#e8ecd8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '700 12px system-ui, sans-serif'; g.fillText(t, r.x + r.w / 2, r.y + r.h / 2 + 1);
+    g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
+  }
   if (mode === 'jeep') { g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(jctlR.x, jctlR.y, jctlR.w, jctlR.h); g.strokeStyle = '#e8ecd8'; g.strokeRect(jctlR.x + 0.5, jctlR.y + 0.5, jctlR.w - 1, jctlR.h - 1);
     g.fillStyle = '#e8ecd8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '700 12px system-ui, sans-serif'; g.fillText(jeepOld ? 'OLD JEEP' : 'NEW JEEP', jctlR.x + jctlR.w / 2, jctlR.y + jctlR.h / 2 + 1);
     g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif'; }
@@ -2666,7 +2724,7 @@ function draw() {
     }
   }
   // minimap with targets
-  const mm = 96, mx = sticksOn() ? 12 : vw - mm - 12, my = 12; miniR.x = mx; miniR.y = my; miniR.s = mm;   // 3.29: sideways top left
+  const mm = MINI_S, mc = sticksOn() ? centreOf('mini') : [vw - mm / 2 - 12, 12 + mm / 2], mx = mc[0] - mm / 2, my = mc[1] - mm / 2; miniR.x = mx; miniR.y = my; miniR.s = mm;   // 3.31: sideways top right by default, movable
   // 1.2: the map is too big to show whole, so the minimap is a MINI_W window around you
   const MINI_W = 6000, P = me(), wx = Math.max(0, Math.min(W - MINI_W, P.x - MINI_W / 2)), wy = Math.max(0, Math.min(H - MINI_W, P.y - MINI_W / 2));
   if (!mapBig) drawMap(g, mx, my, mm, wx, wy, MINI_W, false);
@@ -2685,7 +2743,13 @@ function draw() {
     g.fillStyle = cool ? 'rgba(255,255,255,0.4)' : '#fff'; g.font = `700 ${sticksOn() ? (b === btn.gun && gunLatch ? 8 : 10) : b === btn.gun ? (gunLatch ? 13 : 15) : 12}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText(b === btn.gun && gunLatch ? (sticksOn() ? 'ON' : 'GUN ON') : b.label, b.x, b.y); g.globalAlpha = 1;
   }
-  if (sticksOn() && !dead && !won) drawSticks(g);   // 3.20
+  if (mv && !mv.cancel) {   // 3.31: hold ring fills, then a dashed ring while it moves
+    const k = Math.min(1, (performance.now() - mv.t0) / HOLD_MOVE), cx = mv.k === 'rkt' ? btn.rkt.x : mx + mm / 2, cy = mv.k === 'rkt' ? btn.rkt.y : my + mm / 2, R = mv.k === 'rkt' ? btn.rkt.r + 7 : mm * 0.75;
+    g.strokeStyle = '#ffd64a'; g.lineWidth = 4; g.beginPath();
+    if (mv.lifted) { g.setLineDash([6, 5]); g.arc(cx, cy, R, 0, 7); g.stroke(); g.setLineDash([]); }
+    else if (k > 0.15) { g.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + k * 2 * Math.PI); g.stroke(); }
+  }
+  if (sticksOn() && !dead && !won && !sticksHidden) drawSticks(g);   // 3.20; 3.31 hidden on his word
   g.textAlign = 'center'; g.textBaseline = 'top';
   g.textBaseline = 'top';
   // 1.9 (the player 18:12 "no text"): the how-to box is gone
@@ -2830,6 +2894,7 @@ function frame(now) {
     fpsAcc = fpsN = 0; fpsT0 = now;
   }
   padStep(dt);   // 3.19
+  moveHoldStep();   // 3.31
   if (won) { won.t += dt; T += dt; } else if (!mapBig && !pickOpen) { step(dt); stepFauna(dt); }
   if (fingers.size || heli.turnLeft || heli.yawRate) rec({ e: 'f', dt: r3(dt), hd: r3(heli.hd), yr: r3(heli.yawRate || 0), tl: r3(heli.turnLeft || 0), vx: r1(heli.vx), vy: r1(heli.vy), alt: r3(heli.alt), n: fingers.size });
   markT = Math.max(0, markT - dt);
@@ -2841,7 +2906,7 @@ rec({ e: 'start', v: VERSION, versus: VS ? VS.seed : 0, TURN, FAST_K, FACE_DEAD,
 if (new URLSearchParams(location.search).has('scores')) { history.replaceState(null, '', location.pathname); setTimeout(() => showScores(() => {}), 300); }   // 3.27: widget SCORES button
 if (VS) { foeSpawn(); say('VERSUS on ' + TH.name + ': bring their red flag to your pad. First to ' + VS_WIN, 5); }
 else say('Level ' + LEVEL + ': ' + TH.name + (LEVEL > THEMES.length ? ' (harder)' : ''), 3.5);
-window.rw = { get dpr() { return dpr; }, get fps() { return fpsShow; }, RKT_ZONE, aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
+window.rw = { get pos() { return pos; }, centreOf, get sticksHidden() { return sticksHidden; }, stR, rstR, HOLD_MOVE, get dpr() { return dpr; }, get fps() { return fpsShow; }, RKT_ZONE, aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
 window.rwSet = o => { Object.assign(heli, o); if (o.x !== undefined) { cam.x = heli.x; cam.y = heli.y; } flown = turned = !!o.flown; };
 const q = new URLSearchParams(location.search);
 if (q.has('shot')) rwSet({ x: +q.get('x') || PAD.x, y: +q.get('y') || PAD.y, alt: +q.get('alt') || 0, spin: +(q.get('spin') || 0), want: q.get('alt') > 0 ? 1 : 0, hd: +(q.get('hd') || 0), vx: +(q.get('vx') || 0), vy: +(q.get('vy') || 0), flown: q.has('flown') });
