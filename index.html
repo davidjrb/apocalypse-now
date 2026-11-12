@@ -55,7 +55,7 @@ let QUAL = window.AndroidLog || / wv\)/.test(navigator.userAgent) ? 3 : 1.75; co
 let fpsAcc = 0, fpsN = 0, fpsShow = 0, fpsT0 = 0;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.35';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.36';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -675,12 +675,16 @@ function exitGame() {
 // with STICKS HIDDEN; hold one HOLD_MOVE ms there and drag it, same yield rule. In play a thumb works anywhere: it belongs
 // to whichever resting ring is nearer (with the defaults that is still the left / right half).
 const MOVABLE = ['rkt', 'mini', 'tsL', 'tsR'];
-const defC = k => k === 'rkt' ? [44, 44] : k === 'mini' ? [vw - 12 - MINI_S / 2, 12 + MINI_S / 2] : k === 'tsL' ? [130, vh - 95] : [vw - 130, vh - 95];
+// 3.36 (the player 11-12 01:49 "Make these the default locations", photo 1280x591): sideways defaults are his layout, as
+// fractions of the screen: FLY bottom left, minimap top right, ROCKET right of it, AIM right below the minimap (his
+// 01:51 photo). RESET POSITIONS = these.
+const DEF_F = { tsL: [0.156, 0.750], tsR: [0.830, 0.567], mini: [0.812, 0.178], rkt: [0.937, 0.205] };
+const defC = k => [DEF_F[k][0] * vw, DEF_F[k][1] * vh];
 const radOf = k => k === 'rkt' ? btn.rkt.r + 6 : k === 'mini' ? MINI_S * 0.62 : TS_R + 4;
 function centreOf(k) {
   const m = k === 'rkt' ? btn.rkt.r + 4 : k === 'mini' ? MINI_S / 2 + 4 : TS_R + 4, f = pos[k];
-  if (!f) return defC(k);
-  return [Math.max(m, Math.min(vw - m, f[0] * vw)), Math.max(m, Math.min(vh - m - (k === 'mini' ? 14 : 0), f[1] * vh))];
+  const d = f ? [f[0] * vw, f[1] * vh] : defC(k);
+  return [Math.max(m, Math.min(vw - m, d[0])), Math.max(m, Math.min(vh - m, d[1]))];
 }
 function yieldFrom(k) {   // the others get out of the way of the one being dragged (3.33: any of the four)
   for (const o of MOVABLE) {
@@ -700,8 +704,7 @@ function moveHoldStep() {
 const onBtn = (x, y) => {
   if (sticksOn()) {
     if (mode !== 'heli') return null;
-    if (pos.rkt) return Math.hypot(x - btn.rkt.x, y - btn.rkt.y) < RKT_HIT ? btn.rkt : null;
-    const z = RKT_ZONE(); return x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h ? btn.rkt : null;
+    return Math.hypot(x - btn.rkt.x, y - btn.rkt.y) < RKT_HIT ? btn.rkt : null;   // 3.36: no corner zone, AIM lives there now
   }
   return Object.values(btn).find(b => (mode === 'heli' || b === btn.gun) && b !== btn.land && Math.hypot(x - b.x, y - b.y) < b.r + 10);
 };
@@ -2944,7 +2947,6 @@ function draw() {
   // 1.2: the map is too big to show whole, so the minimap is a MINI_W window around you
   const MINI_W = 6000, P = me(), wx = Math.max(0, Math.min(W - MINI_W, P.x - MINI_W / 2)), wy = Math.max(0, Math.min(H - MINI_W, P.y - MINI_W / 2));
   if (!mapBig) drawMap(g, mx, my, mm, wx, wy, MINI_W, false);
-  if (!mapBig) { g.font = '700 10px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'top'; g.fillStyle = 'rgba(232,236,216,0.8)'; g.fillText('TAP: MAP + MENU', mx + mm / 2, my + mm + 2); g.textAlign = 'left'; }   // 3.24
   if (!mapBig) drawMiniHud(g);   // 3.24
   // buttons (helicopter only)
   placeButtons();
