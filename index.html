@@ -48,7 +48,7 @@ const cv = document.getElementById('c'), cx = cv.getContext('2d');
 let vw = 0, vh = 0, dpr = 1;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.28';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.29';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -589,7 +589,7 @@ const btn = { gun: { x: 0, y: 0, r: 40, down: null, label: 'GUN' }, rkt: { x: 0,
 // Left thumb: a stick that appears where the thumb lands on the left half = fly (the same input as a controller's left
 // stick, 3.19: push = go that way, let go = hover, the nose follows). Right thumb, right half: a stick = point the nose.
 // GUN top right for the index finger (under the minimap), ROCKET beside it, LAND/LIFT on the left. Upright = unchanged.
-const TS_R = 60;
+const TS_R = 60; const stickTap = { tsL: 0, tsR: 0 };
 const coarse = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch (e) { return false; } })();
 const sticksOn = () => coarse && vw > vh;
 function setZoom() { Z = sticksOn() ? ZOOM_SIDE : 1; wvw = vw / Z; wvh = vh / Z; }
@@ -599,11 +599,11 @@ function placeButtons() {
   const S = sticksOn(), top = miniR.y + miniR.s + 14;
   // 3.25 (the player 22:31 "gun and missile buttons are still too big and too much in the way"): sideways they are small,
   // stacked tight to the right edge under the minimap (LAND small on the left); the touch area stays bigger (onBtn +14).
-  btn.gun.r = S ? 22 : 40; btn.rkt.r = S ? 20 : 34; btn.land.r = S ? 20 : 28; btn.rkt.label = S ? 'RKT' : 'ROCKET';
-  const def = S ? { gun: [vw - 30, top + 24], rkt: [vw - 30, top + 72], land: [30, 150] } : { gun: [vw - 62, vh - 70], rkt: [vw - 62 - 98, vh - 64], land: [-99, -99] };
+  btn.gun.r = 40; btn.rkt.r = S ? 26 : 34; btn.land.r = 28; btn.rkt.label = S ? 'RKT' : 'ROCKET';
+  const def = S ? { gun: [-99, -99], rkt: [vw - 44, 44], land: [-99, -99] } : { gun: [vw - 62, vh - 70], rkt: [vw - 62 - 98, vh - 64], land: [-99, -99] };
   for (const k of ['gun', 'rkt', 'land']) {
     const b = btn[k], x = def[k][0], y = def[k][1];
-    b.x = Math.max(b.r + 4, Math.min(vw - b.r - 4, x)); b.y = Math.max(b.r + (S ? 112 : 120), Math.min(vh - b.r - 4, y));
+    b.x = Math.max(b.r + 4, Math.min(vw - b.r - 4, x)); b.y = S ? y : Math.max(b.r + 120, Math.min(vh - b.r - 4, y));
   }
 }
 // Two control schemes, switched by the button at the top (0.3, so the player can feel both):
@@ -618,7 +618,14 @@ const scheme = 'drag';
 const DRAG_R = 110;     // press-point distance for top speed
 const STICK_R = 60, STICK_V = 210;
 const miniR = { x: 0, y: 12, s: 96 };
-const onBtn = (x, y) => Object.values(btn).find(b => (mode === 'heli' || b === btn.gun) && (b !== btn.land || sticksOn() && heli.want > 0) && Math.hypot(x - b.x, y - b.y) < b.r + (sticksOn() ? 14 : 10));
+// 3.29 (the player 23:17 + 23:18 "a way my right index finger can fire a missile", 23:19 "double tapping fly lands"): sideways
+// there is no GUN or LAND button: double-tap the AIM stick = gun on/off, double-tap the FLY stick = land. ROCKET sits in
+// the top right corner, and the whole corner (RKT_ZONE) is its button, so the index finger finds it while the thumb aims.
+const RKT_ZONE = () => ({ x: vw - 170, y: 0, w: 170, h: Math.max(120, vh * 0.3) });
+const onBtn = (x, y) => {
+  if (sticksOn()) { const z = RKT_ZONE(); return mode === 'heli' && x >= z.x && y >= z.y && y <= z.y + z.h ? btn.rkt : null; }
+  return Object.values(btn).find(b => (mode === 'heli' || b === btn.gun) && b !== btn.land && Math.hypot(x - b.x, y - b.y) < b.r + 10);
+};
 
 // ---------- touch ----------
 const fingers = new Map();               // steering pointers: id -> {ox, oy, x, y, t, path, mode, lastA}
@@ -824,7 +831,17 @@ function up(e) {
   }
   const f = fingers.get(e.pointerId); if (!f) return;
   fingers.delete(e.pointerId);
-  if (f.mode === 'tsL' || f.mode === 'tsR') return;   // 3.20
+  if (f.mode === 'tsL' || f.mode === 'tsR') {   // 3.20; 3.29: a quick tap on a stick, twice = AIM: gun on/off, FLY: land
+    const now = performance.now();
+    if (now - f.t < 250 && Math.hypot(f.x - f.ox, f.y - f.oy) < 14 && !f.held) {
+      const last = stickTap[f.mode];
+      if (now - last < 350) { stickTap[f.mode] = 0;
+        if (f.mode === 'tsR') { gunLatch = !gunLatch; gunOn = gunLatch; say(gunLatch ? 'Gun ON (double-tap AIM to stop)' : 'Gun off', 1.5); }
+        else if (mode === 'heli' && heli.want > 0) toggleLand();
+      } else stickTap[f.mode] = now;
+    }
+    return;
+  }
   if (f.mode === 'dg') { heli.turnLeft = 0; heli.yawRate = 0; }   // 1.3 (the player 23:31): let go = stop rotating at once
   if (f.mode === 'twist') { if (fingers.size < 2) twist = null; for (const o of fingers.values()) o.mode = 'twist'; return; }
   const now = performance.now(), dur = now - f.t, d = Math.hypot(f.x - f.ox, f.y - f.oy);
@@ -2428,11 +2445,13 @@ function drawSticks(g) {   // 3.20: a ring where the thumb landed + the knob; fa
     const f = [...fingers.values()].find(o => o.mode === side);
     if (side === 'tsR' && mode === 'jeep' && !f) continue;
     const ox = f ? f.ox : rest[side][0], oy = f ? f.oy : rest[side][1];
-    g.globalAlpha = f ? 0.55 : 0.28; g.strokeStyle = '#fff'; g.lineWidth = 2.5; g.fillStyle = 'rgba(0,0,0,0.25)';
+    const gunRing = side === 'tsR' && gunLatch;   // 3.29: gun on = the AIM ring glows
+    g.globalAlpha = f ? 0.55 : gunRing ? 0.6 : 0.28; g.strokeStyle = gunRing ? '#ffb347' : '#fff'; g.lineWidth = gunRing ? 4 : 2.5; g.fillStyle = gunRing ? 'rgba(255,150,40,0.18)' : 'rgba(0,0,0,0.25)';
     g.beginPath(); g.arc(ox, oy, TS_R, 0, 7); g.fill(); g.stroke();
     let dx = f ? f.x - ox : 0, dy = f ? f.y - oy : 0; const d = Math.hypot(dx, dy); if (d > TS_R) { dx *= TS_R / d; dy *= TS_R / d; }
     g.fillStyle = 'rgba(255,255,255,0.75)'; g.beginPath(); g.arc(ox + dx, oy + dy, 22, 0, 7); g.fill();
-    if (!f) { g.fillStyle = '#000'; g.font = '700 11px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(rest[side][2], ox, oy); }
+    if (!f) { g.fillStyle = '#000'; g.font = '700 11px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(gunRing ? 'GUN ON' : rest[side][2], ox, oy); }
+    else if (gunRing) { g.fillStyle = '#ffb347'; g.font = '800 11px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom'; g.fillText('GUN ON', ox, oy - TS_R - 4); }
     g.globalAlpha = 1;
   }
 }
@@ -2440,6 +2459,7 @@ function drawSticks(g) {   // 3.20: a ring where the thumb landed + the knob; fa
 // unreasonably much real estate"): in play only small ARMOR/AMMO/RKT/FUEL bars (+ YOU:THEM in VERSUS) top left; the full
 // readout, LEVELS, VERSUS and the jeep OLD/NEW switch are on the big map (tap the minimap).
 function drawMiniHud(g) {
+  if (sticksOn()) return drawHudStrip(g);   // 3.29
   const J = mode === 'jeep' && jeep, x = 10, y = 12, bx = 50, bw = 56;
   g.fillStyle = 'rgba(0,0,0,0.38)'; g.fillRect(x, y, 112, 54 + (VS ? 16 : 0));
   g.font = '700 10px system-ui, sans-serif'; g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillStyle = '#e8ecd8';
@@ -2456,6 +2476,22 @@ function drawMiniHud(g) {
   g.fillStyle = fl < FUEL_LOW ? (T % 0.8 < 0.4 ? '#ff5a3c' : '#a83a26') : '#8fd16a'; g.fillRect(x + bx, y + 41, bw * fl, 8);
   if (VS) { g.font = '700 12px system-ui, sans-serif'; g.fillStyle = '#7ab8ff'; g.fillText('YOU ' + vs.me, x + 5, y + 61); g.fillStyle = '#ff7a6a'; g.textAlign = 'right'; g.fillText(vs.foe + ' THEM', x + 107, y + 61); g.textAlign = 'left'; }
   g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
+}
+// 3.29 (the player 23:17 "make the ammo and fuel stuff discreet like a faint overlay over the bottom area"): sideways the bars
+// are a faint strip along the bottom between the sticks; a bar under 20% turns solid red. Tap the minimap for the full panel.
+function drawHudStrip(g) {
+  const J = mode === 'jeep' && jeep, w = Math.min(320, vw - 2 * 200), x0 = vw / 2 - w / 2, y = vh - 16, seg = (w - 3 * 10) / 4;
+  const hp = J ? jeep.hp : heli.hp, hpN = J ? JEEP_HP : HP_MAX, am = (J ? jeep.ammo : ammo) / (J ? JEEP_AMMO : AMMO_MAX), rk = J ? 1 : rkts / RKT_MAX, fl = J ? jeep.fuel / JEEP_FUEL : fuel / FUEL_MAX;
+  const items = [['ARMOR', hp / hpN, '#8fd16a'], ['AMMO', am, '#e8d24a'], [J ? 'JEEP' : 'RKT', rk, '#ffd64a'], ['FUEL', fl, '#8fd16a']];
+  g.font = '700 9px system-ui, sans-serif'; g.textAlign = 'left'; g.textBaseline = 'bottom';
+  items.forEach(([lab, v, col], i) => {
+    const x = x0 + i * (seg + 10), low = v < 0.2;
+    g.globalAlpha = low ? 0.95 : 0.4; g.fillStyle = '#fff'; g.fillText(lab, x, y - 2);
+    g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(x, y, seg, 5);
+    g.fillStyle = low ? '#ff3a2a' : col; g.fillRect(x, y, seg * Math.max(0, Math.min(1, v)), 5);
+  });
+  if (VS) { g.globalAlpha = 0.85; g.font = '700 12px system-ui, sans-serif'; g.textAlign = 'center'; g.fillStyle = '#7ab8ff'; g.fillText('YOU ' + vs.me, vw / 2 - 30, y - 14); g.fillStyle = '#ff7a6a'; g.fillText(vs.foe + ' THEM', vw / 2 + 30, y - 14); }
+  g.globalAlpha = 1; g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
 }
 function drawReadout(g) {   // the old full panel + LEVELS / VERSUS / jeep switch: big map only since 3.24
   g.textAlign = 'left';
@@ -2623,7 +2659,7 @@ function draw() {
     }
   }
   // minimap with targets
-  const mm = 96, mx = vw - mm - 12, my = 12; miniR.x = mx; miniR.y = my; miniR.s = mm;
+  const mm = 96, mx = sticksOn() ? 12 : vw - mm - 12, my = 12; miniR.x = mx; miniR.y = my; miniR.s = mm;   // 3.29: sideways top left
   // 1.2: the map is too big to show whole, so the minimap is a MINI_W window around you
   const MINI_W = 6000, P = me(), wx = Math.max(0, Math.min(W - MINI_W, P.x - MINI_W / 2)), wy = Math.max(0, Math.min(H - MINI_W, P.y - MINI_W / 2));
   if (!mapBig) drawMap(g, mx, my, mm, wx, wy, MINI_W, false);
@@ -2633,8 +2669,8 @@ function draw() {
   placeButtons();
   for (const b of Object.values(btn)) {
     if (mode === 'jeep' && b !== btn.gun) continue;   // 2.3: the jeep has the gun only
-    if (b === btn.land && !(sticksOn() && heli.want > 0)) continue;   // 3.26 (the player 22:41 "Lift button is useless"): LAND only, in the air; the stick takes off
-    if (b === btn.land) b.label = 'LAND';
+    if (b === btn.land) continue;   // 3.29: no LAND button (sideways: double-tap FLY)
+    if (sticksOn() && b === btn.gun) continue;   // 3.29: sideways gun = double-tap AIM
     g.globalAlpha = sticksOn() ? 0.75 : 1;
     const on = b === btn.gun ? gunOn : b.down !== null, cool = b === btn.rkt && rktCool > 0;
     g.fillStyle = on ? 'rgba(255,200,80,0.55)' : 'rgba(0,0,0,0.38)'; g.beginPath(); g.arc(b.x, b.y, b.r, 0, 7); g.fill();
@@ -2792,7 +2828,7 @@ rec({ e: 'start', v: VERSION, versus: VS ? VS.seed : 0, TURN, FAST_K, FACE_DEAD,
 if (new URLSearchParams(location.search).has('scores')) { history.replaceState(null, '', location.pathname); setTimeout(() => showScores(() => {}), 300); }   // 3.27: widget SCORES button
 if (VS) { foeSpawn(); say('VERSUS on ' + TH.name + ': bring their red flag to your pad. First to ' + VS_WIN, 5); }
 else say('Level ' + LEVEL + ': ' + TH.name + (LEVEL > THEMES.length ? ' (harder)' : ''), 3.5);
-window.rw = { aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
+window.rw = { RKT_ZONE, aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
 window.rwSet = o => { Object.assign(heli, o); if (o.x !== undefined) { cam.x = heli.x; cam.y = heli.y; } flown = turned = !!o.flown; };
 const q = new URLSearchParams(location.search);
 if (q.has('shot')) rwSet({ x: +q.get('x') || PAD.x, y: +q.get('y') || PAD.y, alt: +q.get('alt') || 0, spin: +(q.get('spin') || 0), want: q.get('alt') > 0 ? 1 : 0, hd: +(q.get('hd') || 0), vx: +(q.get('vx') || 0), vy: +(q.get('vy') || 0), flown: q.has('flown') });
