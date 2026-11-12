@@ -1600,8 +1600,16 @@ let foe = null;
 function foeSpawn() {
   if (!foe) { foe = { kind: 'foe', r: 22, t: 0, hit: 0, air: false }; targets.push(foe); }
   Object.assign(foe, { x: FOE_PAD.x, y: FOE_PAD.y, vx: 0, vy: 0, hd: Math.PI, alt: 0, spin: 0, rotor: 0, tail: 0, pitch: 0, roll: 0, hp: HP_MAX, hurt: 0,
-    down: null, cool: 0, wait: 1.5, fix: 0, dead: 0 });
+    down: null, cool: 0, wait: 1.5, fix: 0, dead: 0, ammo: AMMO_MAX, fuel: FUEL_MAX, seen: null });
 }
+// 3.21 (the player 11-11 22:06 "why does he have endless missiles", 22:07 "I just want the computer to have the same limits
+// as I have. Also, he can see me when I'm out of view"): the computer has your ammo (AMMO_MAX, each of its shots costs
+// FOE_SHOT_COST = what half a second of your gun costs, so both get ~50 s of shooting) and your fuel (FUEL_MAX, burns
+// while flying, same rate); it refills only by landing on its own pad, and heads home when low. It only knows where you
+// are while you're inside its view: a box your screen's size around it (what you'd see from there). Out of view it goes
+// to where it last saw you; a thief it can't see is waited for at your pad (where the flag has to go).
+const FOE_SHOT_COST = 10;
+const foeSees = (c, P) => Math.abs(P.x - c.x) < vw / 2 && Math.abs(P.y - c.y) < vh / 2;
 function vsDrop(who) {   // the carrier went down: the flag falls where it is
   for (const f of flags) if (f.carrier === who) { f.carrier = null; say(who === 'me' ? 'You dropped their flag' : 'They dropped your flag!', 2.5); }
 }
@@ -1621,11 +1629,15 @@ function vsPoint(who) {
 }
 // the computer pilot: where to go, whether to set down there, where to point the nose, when to shoot
 function foeThink(c) {
-  const P = me(), mine = flags[1], yours = flags[0], pd = Math.hypot(P.x - c.x, P.y - c.y);
+  const P = me(), mine = flags[1], yours = flags[0], pd = Math.hypot(P.x - c.x, P.y - c.y), sees = !dead && foeSees(c, P);
+  if (sees) c.seen = { x: P.x, y: P.y };
+  else if (c.seen && Math.hypot(c.seen.x - c.x, c.seen.y - c.y) < 120) c.seen = null;   // got there, nobody: forget it
+  const low = c.fuel < FUEL_MAX * FUEL_LOW || c.ammo < FOE_SHOT_COST;
   let goal, land = true;
   if (yours.carrier === 'foe') goal = FOE_PAD;                                         // run it home
-  else if (c.hp <= 1) goal = FOE_PAD;                                                  // badly hit: go and repair
-  else if (mine.carrier === 'me') { goal = P; land = false; }                          // chase the thief
+  else if (c.hp <= 1 || low) goal = FOE_PAD;                                           // badly hit / low on fuel or ammo: home
+  else if (mine.carrier === 'me') { goal = sees ? P : c.seen || PAD; land = false; }   // chase the thief it can see, else last seen, else wait at your pad
+  else if (c.seen && !sees) { goal = c.seen; land = false; }                           // go and look where it last saw you
   else if (!mine.carrier && !atHome(mine)) goal = mine;                                // fetch our dropped flag
   else goal = yours;                                                                   // go and take yours
   const dx = goal.x - c.x, dy = goal.y - c.y, d = Math.hypot(dx, dy);
@@ -1633,9 +1645,9 @@ function foeThink(c) {
   if (land && d < 26 && Math.hypot(c.vx, c.vy) < 40) inp.lift = 0;                    // over it and slow: set down
   else { const v = Math.min(FOE_V, d * 1.4); inp.tx = d ? dx / d * v : 0; inp.ty = d ? dy / d * v : 0; if (!land && d < 140) inp.tx = inp.ty = 0; }
   if (d > 30) inp.hd = Math.atan2(dx, -dy);
-  if (!dead && pd < FOE_SEE) {   // you're close: nose on you, shoot
+  if (sees && pd < FOE_SEE) {   // you're in view and close: nose on you, shoot (if it has the rounds)
     inp.hd = Math.atan2(P.x - c.x, -(P.y - c.y));
-    inp.gun = Math.abs(ang(inp.hd - c.hd)) < 0.3;
+    inp.gun = Math.abs(ang(inp.hd - c.hd)) < 0.3 && c.ammo >= FOE_SHOT_COST;
   }
   return inp;
 }
@@ -1654,6 +1666,7 @@ function foeStep(c, dt) {
   const lift = inp.lift && c.spin > 0.7 ? 1 : 0;
   c.alt += (lift - c.alt) * Math.min(1, dt * (lift ? 1.6 : 1.2)); if (c.alt < (inp.lift ? 0.003 : 0.03)) c.alt = 0;
   const air = c.alt > 0.35; c.air = air;
+  if (inp.lift && c.spin > 0.5) { c.fuel = Math.max(0, c.fuel - dt); if (c.fuel === 0) c.wait = 1e9; }   // 3.21: your burn rate; dry = it comes down and stays
   let axl = 0, ayl = 0;
   if (air) { const kk = Math.min(1, dt * 3), dvx = (inp.tx - c.vx) * kk, dvy = (inp.ty - c.vy) * kk; c.vx += dvx; c.vy += dvy; axl = dvx / dt; ayl = dvy / dt;
     if (inp.hd !== undefined) c.hd = ang(c.hd + Math.max(-FOE_YAW * dt, Math.min(FOE_YAW * dt, ang(inp.hd - c.hd)))); }
@@ -1662,7 +1675,7 @@ function foeStep(c, dt) {
   c.rotor += dt * c.spin * 26; c.tail += dt * c.spin * 60;
   c.cool -= dt;
   if (inp.gun && air && c.cool <= 0) {             // one round at a time, a little off: you can dodge it
-    c.cool = FOE_GUN; const a = c.hd + (R() - 0.5) * 2 * FOE_SPREAD, nx = c.x + Math.sin(c.hd) * 38, ny = c.y - Math.cos(c.hd) * 38;
+    c.cool = FOE_GUN; c.ammo -= FOE_SHOT_COST; const a = c.hd + (R() - 0.5) * 2 * FOE_SPREAD, nx = c.x + Math.sin(c.hd) * 38, ny = c.y - Math.cos(c.hd) * 38;
     shells.push({ x: nx, y: ny, vx: Math.sin(a) * FOE_SHOT_V, vy: -Math.cos(a) * FOE_SHOT_V, t: 0, life: 0.95, from: 'foe' });
     puffs.push({ x: nx, y: ny, vx: 0, vy: 0, t: 0, life: 0.12, spark: true });
   }
@@ -1672,6 +1685,7 @@ function foeStep(c, dt) {
     if (!mine.carrier && !atHome(mine) && Math.hypot(mine.x - c.x, mine.y - c.y) < FLAG_R) { sendHome(mine); c.wait = 0.4; say('They took their flag home', 2); }
     if (Math.hypot(c.x - FOE_PAD.x, c.y - FOE_PAD.y) < 56) {
       if (yours.carrier === 'foe') { vsPoint('foe'); c.wait = 1; }
+      if (c.ammo < AMMO_MAX || c.fuel < FUEL_MAX - 1) { c.ammo = AMMO_MAX; c.fuel = FUEL_MAX; c.wait = Math.max(c.wait, 1); }   // 3.21: refills only here
       if (c.hp < HP_MAX) { c.fix += dt; c.wait = Math.max(c.wait, 0.2); if (c.fix > 1) { c.fix = 0; c.hp++; } }
     }
   }
@@ -2718,7 +2732,7 @@ function frame(now) {
   draw();
   requestAnimationFrame(frame);
 }
-rec({ e: 'start', v: '3.20', versus: VS ? VS.seed : 0, TURN, FAST_K, FACE_DEAD, FACE_RATE, vw, vh, dpr: devicePixelRatio, level: LEVEL, MAXV, DRAG_R, CURVE_LEN, R_NONE, R_FULL });
+rec({ e: 'start', v: '3.21', versus: VS ? VS.seed : 0, TURN, FAST_K, FACE_DEAD, FACE_RATE, vw, vh, dpr: devicePixelRatio, level: LEVEL, MAXV, DRAG_R, CURVE_LEN, R_NONE, R_FULL });
 // test hooks (screenshots, scripted checks)
 if (VS) { foeSpawn(); say('VERSUS on ' + TH.name + ': bring their red flag to your pad. First to ' + VS_WIN, 5); }
 else say('Level ' + LEVEL + ': ' + TH.name + (LEVEL > THEMES.length ? ' (harder)' : ''), 3.5);
