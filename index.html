@@ -48,7 +48,7 @@ const cv = document.getElementById('c'), cx = cv.getContext('2d');
 let vw = 0, vh = 0, dpr = 1;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.24';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.25';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -594,10 +594,13 @@ function setZoom() { Z = sticksOn() ? ZOOM_SIDE : 1; wvw = vw / Z; wvh = vh / Z;
 localStorage.removeItem('apocalypse.buttons');
 function placeButtons() {
   const S = sticksOn(), top = miniR.y + miniR.s + 14;
-  const def = S ? { gun: [vw - 58, top + 40], rkt: [vw - 58 - 88, top + 28], land: [52, 150] } : { gun: [vw - 62, vh - 70], rkt: [vw - 62 - 98, vh - 64], land: [-99, -99] };
+  // 3.25 (the player 22:31 "gun and missile buttons are still too big and too much in the way"): sideways they are small,
+  // stacked tight to the right edge under the minimap (LAND small on the left); the touch area stays bigger (onBtn +14).
+  btn.gun.r = S ? 22 : 40; btn.rkt.r = S ? 20 : 34; btn.land.r = S ? 20 : 28; btn.rkt.label = S ? 'RKT' : 'ROCKET';
+  const def = S ? { gun: [vw - 30, top + 24], rkt: [vw - 30, top + 72], land: [30, 150] } : { gun: [vw - 62, vh - 70], rkt: [vw - 62 - 98, vh - 64], land: [-99, -99] };
   for (const k of ['gun', 'rkt', 'land']) {
     const b = btn[k], x = def[k][0], y = def[k][1];
-    b.x = Math.max(b.r + 4, Math.min(vw - b.r - 4, x)); b.y = Math.max(b.r + 120, Math.min(vh - b.r - 4, y));
+    b.x = Math.max(b.r + 4, Math.min(vw - b.r - 4, x)); b.y = Math.max(b.r + (S ? 112 : 120), Math.min(vh - b.r - 4, y));
   }
 }
 // Two control schemes, switched by the button at the top (0.3, so the player can feel both):
@@ -612,7 +615,7 @@ const scheme = 'drag';
 const DRAG_R = 110;     // press-point distance for top speed
 const STICK_R = 60, STICK_V = 210;
 const miniR = { x: 0, y: 12, s: 96 };
-const onBtn = (x, y) => Object.values(btn).find(b => (mode === 'heli' || b === btn.gun) && (b !== btn.land || sticksOn()) && Math.hypot(x - b.x, y - b.y) < b.r + 10);
+const onBtn = (x, y) => Object.values(btn).find(b => (mode === 'heli' || b === btn.gun) && (b !== btn.land || sticksOn()) && Math.hypot(x - b.x, y - b.y) < b.r + (sticksOn() ? 14 : 10));
 
 // ---------- touch ----------
 const fingers = new Map();               // steering pointers: id -> {ox, oy, x, y, t, path, mode, lastA}
@@ -650,7 +653,7 @@ function liftNow() { if (mode === 'heli' && heli.want === 0 && fuel > 0 && !dead
 // controller (browser Gamepad API) or the keyboard drives the same controls as a thumb. The left stick (or d-pad, WASD,
 // arrows) is a virtual DRAG finger 'pad': stick direction and push = drag direction and length, so the chopper and the
 // jeep fly/drive exactly as with a finger; stick centred = slow to a hover / stop. In the air the nose turns toward the
-// stick; the right stick, when pushed, points the nose instead (aim while flying another way).
+// stick; the right stick, when pushed, points the nose instead (aim while flying another way). 3.25: the nose no longer follows the left stick.
 // Buttons: RT or A = gun (held), B or RB = rocket, X = land / take off, hold Y = take the jeep you're next to,
 // Start = pause (LEVELS). A continues on the end screens. Keys: Space gun, R rocket, L land, hold F jeep, P pause, Enter.
 const PAD_DEAD = 0.18, PAD_AIM = 0.4, PAD_IDLE = 1.5;
@@ -708,15 +711,14 @@ function padStep(dt) {
     }
     if (f && push) liftNow();                       // pushing the stick from centre takes off, like a touch
     if (f) { const L = 8 + (m - PAD_DEAD) / (1 - PAD_DEAD) * (DRAG_R - 8); f.x = lx / m * L; f.y = ly / m * L; }
-  } else if (f) {
-    f.x = f.y = 0;                                    // centred: slow to a hover / stop, then hand back to touch
-    if (Math.hypot(s.rx, s.ry) <= PAD_AIM) padIdle += dt; if (padIdle > PAD_IDLE) padDrop();
-  }
+  } else if (f) padDrop();   // 3.25 (the player 22:30 "when you let go of left joystick it keeps its speed just like before"): centred = glide on, like letting go of a drag
   // nose: right stick if pushed, else where the left stick points (air only; the jeep steers itself from the finger)
   if (mode === 'heli' && heli.alt > 0.35) {
     const rm = Math.hypot(s.rx, s.ry);
+    // 3.25 (the player 11-11 22:29 "Left js: up down left right relative to map. Right js: direction of helicopter"): the left
+    // stick only moves the chopper (map directions), it never turns the nose; only the right stick does, and the nose
+    // stays where it was left.
     if (rm > PAD_AIM) { heli.turnLeft = ang(Math.atan2(s.rx, -s.ry) - heli.hd); padAimed = true; }
-    else if (fingers.get('pad')) { heli.turnLeft = m > PAD_DEAD + 0.1 ? ang(Math.atan2(lx, -ly) - heli.hd) : 0; padAimed = false; }
     else if (padAimed) { heli.turnLeft = 0; padAimed = false; }
   }
   // buttons
@@ -729,7 +731,7 @@ function padStep(dt) {
     if (padYT >= JEEP_HOLD / 1000 && padYT - dt < JEEP_HOLD / 1000 && mode === 'heli') { const t = stealCandidate(); if (t) holdJeep(t); else say('Get next to a jeep and slow down, then hold Y'); }
   } else padYT = 0;
 }
-function padDrop() { if (fingers.delete('pad')) { heli.turnLeft = 0; heli.yawRate = 0; } padIdle = 0; }
+function padDrop() { fingers.delete('pad'); padIdle = 0; }
 cv.addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse') askFullscreen();   // 3.17; touch asks on pointerup (3.19)
   try { cv.setPointerCapture(e.pointerId); } catch (err) {}
@@ -2619,11 +2621,12 @@ function draw() {
     if (mode === 'jeep' && b !== btn.gun) continue;   // 2.3: the jeep has the gun only
     if (b === btn.land && !sticksOn()) continue;
     if (b === btn.land) b.label = heli.want ? 'LAND' : 'LIFT';
+    g.globalAlpha = sticksOn() ? 0.75 : 1;
     const on = b === btn.gun ? gunOn : b.down !== null, cool = b === btn.rkt && rktCool > 0;
     g.fillStyle = on ? 'rgba(255,200,80,0.55)' : 'rgba(0,0,0,0.38)'; g.beginPath(); g.arc(b.x, b.y, b.r, 0, 7); g.fill();
     g.strokeStyle = cool ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.65)'; g.lineWidth = 2.5; g.stroke();
-    g.fillStyle = cool ? 'rgba(255,255,255,0.4)' : '#fff'; g.font = `700 ${b === btn.gun ? (gunLatch ? 13 : 15) : 12}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillText(b === btn.gun && gunLatch ? 'GUN ON' : b.label, b.x, b.y);
+    g.fillStyle = cool ? 'rgba(255,255,255,0.4)' : '#fff'; g.font = `700 ${sticksOn() ? (b === btn.gun && gunLatch ? 8 : 10) : b === btn.gun ? (gunLatch ? 13 : 15) : 12}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(b === btn.gun && gunLatch ? (sticksOn() ? 'ON' : 'GUN ON') : b.label, b.x, b.y); g.globalAlpha = 1;
   }
   if (sticksOn() && !dead && !won) drawSticks(g);   // 3.20
   g.textAlign = 'center'; g.textBaseline = 'top';
