@@ -55,7 +55,7 @@ let QUAL = window.AndroidLog || / wv\)/.test(navigator.userAgent) ? 3 : 1.75; co
 let fpsAcc = 0, fpsN = 0, fpsShow = 0, fpsT0 = 0;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.31';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.32';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -682,13 +682,65 @@ let twist = null, lastTap = 0, lastTapX = 0, lastTapY = 0, taps = 0;
 // jeep, then the pilot goes for it (in the air the chopper lands first, as before). A press anywhere else is untouched.
 const JEEP_PRESS = 55, JEEP_HOLD = 500;
 let stealAsk = false;
-function jeepUnder(x, y) {
-  if (mode !== 'heli' || dead || pilot.out) return null;
+function jeepUnder(x, y) {   // 3.32: from a jeep, empty (parked) ones only
+  if ((mode !== 'heli' && mode !== 'jeep') || dead || pilot.out) return null;
   const wx = cam.x - wvw / 2 + x / Z, wy = cam.y - wvh / 2 + y / Z; let best = null, bd = JEEP_PRESS;
-  for (const t of targets) if (t.kind === 'jeep' && !t.dead && !t.stolen) { const d = Math.hypot(t.x - wx, t.y - wy); if (d < bd) { bd = d; best = t; } }
+  for (const t of targets) if (t.kind === 'jeep' && !t.dead && !t.stolen && (mode === 'heli' || t.parked)) { const d = Math.hypot(t.x - wx, t.y - wy); if (d < bd) { bd = d; best = t; } }
   return best;
 }
+// 3.32 (the player 11-12 00:42 "After you shoot half of the jeep's armor its driver runs out of it, leaving it for the taking.
+// Trade-off: you end up with a jeep that's only got half the armor left. I should be able to hijack other jeeps from the
+// jeep"): a driving enemy jeep shot down to BAIL_AT of its armor stops; the driver jumps out and runs off (runners[],
+// shootable, +10); the jeep is left empty and parked (BAIL_SAFE s of grace from gun rounds so the stream that did it
+// doesn't finish it). Taking it gives JEEP_HP x its remaining share (half, for a 3-hp jeep shot once). From your jeep:
+// drive up to an empty jeep (slow, within STEAL_R) and hold on it (touch, Y, F) = swap; your old jeep stays parked with its
+// own armor, fuel, ammo and cargo. The chopper can still take any live jeep, as before.
+const BAIL_SAFE = 1.5, RUNNER_V = 70, RUNNER_LIFE = 7;
+const runners = [];
+const bailAt = t => Math.ceil(t.max / 2);
+function bailJeep(t) {
+  t.parked = true; t.bailed = true; t.safeT = BAIL_SAFE; t.vx = t.vy = 0;
+  const P = me(), a = Math.atan2(t.y - P.y, t.x - P.x) + (R() - 0.5) * 0.8;
+  runners.push({ x: t.x + Math.cos(a) * 14, y: t.y + Math.sin(a) * 14, hd: a, t: 0 });
+  say('The driver ran off: the jeep is yours to take', 2.5);
+}
+function stepRunners(dt) {
+  for (let i = runners.length - 1; i >= 0; i--) {
+    const r = runners[i]; r.t += dt;
+    const nx = r.x + Math.cos(r.hd) * RUNNER_V * dt, ny = r.y + Math.sin(r.hd) * RUNNER_V * dt;
+    if (isWater(nx, ny) || inBuilding(nx, ny)) r.hd += 1.2; else { r.x = nx; r.y = ny; }
+    if (r.t > RUNNER_LIFE) runners.splice(i, 1);
+  }
+}
+function hitRunner(x, y, m) {
+  const i = runners.findIndex(r => Math.hypot(r.x - x, r.y - y) < m); if (i < 0) return false;
+  const r = runners[i]; runners.splice(i, 1); score += 10; addScorch(r.x, r.y, false); puffs.push({ x: r.x, y: r.y, vx: 0, vy: 0, t: 0, life: 0.3, spark: true });
+  return true;
+}
+function drawRunner(g, r) {
+  const sw = Math.sin(r.t * 16) * 4, fade = Math.min(1, (RUNNER_LIFE - r.t) / 1.2);
+  g.save(); g.globalAlpha = Math.max(0, fade); g.translate(r.x, r.y); g.rotate(r.hd + Math.PI / 2); g.scale(2, 2);
+  g.fillStyle = 'rgba(0,0,0,0.3)'; g.beginPath(); g.ellipse(3, 3, 6, 4, 0, 0, 7); g.fill();
+  g.strokeStyle = '#3a3020'; g.lineWidth = 2.6; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(-2.5, 0); g.lineTo(-2.5 + 0.3 * sw, -sw); g.moveTo(2.5, 0); g.lineTo(2.5 - 0.3 * sw, sw); g.stroke();
+  g.fillStyle = '#8a7444'; g.beginPath(); g.ellipse(0, 0, 5, 3.6, 0, 0, 7); g.fill();
+  g.fillStyle = '#5e4e2c'; g.beginPath(); g.arc(0, 0.5, 2.8, 0, 7); g.fill();
+  g.restore();
+}
+function swapJeep(t) {   // 3.32: from your jeep into another; yours stays parked with its own stock
+  const old = jeep, carried = flag.carried;
+  takeJeep(t);
+  targets.push({ kind: 'jeep', x: old.x, y: old.y, hd: old.hd, hp: 3, max: 3, r: 14, vx: 0, vy: 0, t: 0, hit: 0, dead: 0, parked: true,
+    js: { hp: old.hp, fuel: old.fuel, ammo: old.ammo, cargo: { ...old.cargo } } });
+  if (carried) { flag.carried = true; flag.x = jeep.x; flag.y = jeep.y; }
+  say('New jeep! Your old one stays here', 2.5);
+}
 function holdJeep(t) {
+  if (mode === 'jeep') {   // 3.32
+    if (!jeep || Math.hypot(t.x - jeep.x, t.y - jeep.y) > STEAL_R || Math.abs(jeep.v || Math.hypot(jeep.vx, jeep.vy)) > 60) { say('Stop next to the empty jeep, then hold on it'); return; }
+    if (!t.parked) { say('Someone is driving that one: shoot it first'); return; }
+    swapJeep(t); return;
+  }
   const reach = fuel === 0 ? STEAL_FAR : STEAL_R;
   if (Math.hypot(t.x - heli.x, t.y - heli.y) > reach || Math.hypot(heli.vx, heli.vy) > 60) { say('Get closer to the jeep, then hold on it'); return; }
   stealAsk = true; if (heli.want) { heli.want = 0; heli.px = heli.py = 0; }
@@ -782,6 +834,9 @@ function padStep(dt) {
   if (s.b.steal) {
     padYT += dt;
     if (padYT >= JEEP_HOLD / 1000 && padYT - dt < JEEP_HOLD / 1000 && mode === 'heli') { const t = stealCandidate(); if (t) holdJeep(t); else say('Get next to a jeep and slow down, then hold Y'); }
+    if (padYT >= JEEP_HOLD / 1000 && padYT - dt < JEEP_HOLD / 1000 && mode === 'jeep' && jeep) {   // 3.32: jeep to jeep
+      let t = null, bd = STEAL_R; for (const o of targets) if (o.kind === 'jeep' && !o.dead && o.parked) { const d = Math.hypot(o.x - jeep.x, o.y - jeep.y); if (d < bd) { bd = d; t = o; } }
+      if (t) holdJeep(t); else say('Stop next to an empty jeep, then hold Y'); }
   } else padYT = 0;
 }
 function padDrop() { fingers.delete('pad'); padIdle = 0; }
@@ -823,7 +878,7 @@ cv.addEventListener('pointerdown', e => {
     const side = e.clientX < vw / 2 ? 'tsL' : 'tsR';
     if ([...fingers.values()].some(o => o.mode === side)) return;
     const f = { ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY, t: performance.now(), path: [], mode: side };
-    if (side === 'tsL') { const jh = jeepUnder(e.clientX, e.clientY); if (jh) f.jeepHold = jh; }   // hold on a jeep = take it
+    if (side === 'tsL' || mode === 'jeep') { const jh = jeepUnder(e.clientX, e.clientY); if (jh) f.jeepHold = jh; }   // hold on a jeep = take it (3.32: from a jeep, either thumb)
     fingers.set(e.pointerId, f); return;
   }
   const now = performance.now();
@@ -1239,7 +1294,7 @@ function drawPilot(g) {
 let fuel = FUEL_MAX, prevAlt = 0;
 function takeJeep(t) {
   targets.splice(targets.indexOf(t), 1);
-  const s = t.js || { hp: JEEP_HP, fuel: JEEP_FUEL * (0.5 + R() * 0.5), ammo: Math.round(JEEP_AMMO * (0.4 + R() * 0.6)), cargo: { fuel: false, ammo: false } };
+  const s = t.js || { hp: t.bailed ? Math.max(1, Math.floor(JEEP_HP * t.hp / t.max)) : JEEP_HP, fuel: JEEP_FUEL * (0.5 + R() * 0.5), ammo: Math.round(JEEP_AMMO * (0.4 + R() * 0.6)), cargo: { fuel: false, ammo: false } };
   jeep = { x: t.x, y: t.y, hd: t.hd, v: 0, vx: 0, vy: 0, hp: s.hp, fuel: s.fuel, ammo: s.ammo, cargo: { ...s.cargo }, hurt: 0, away: false, crashT: 0 };
   mode = 'jeep'; pilot.out = false; pilot.jeepT = null; gunOn = gunLatch = false; fingers.clear();
   if (navigator.vibrate) navigator.vibrate(40);
@@ -1499,7 +1554,9 @@ function fireRocket() {
 function damage(t, n, friendly) {
   if (t.dead) return;
   if (t.kind === 'foe') { foeHurt(t, n); return; }   // 3.18
+  if (t.safeT > 0 && n < 8) return;   // 3.32: just bailed out: the gun stream doesn't finish it, a rocket does
   t.hp -= n; t.hit = 0.12;
+  if (t.kind === 'jeep' && !t.parked && !t.stolen && t.hp > 0 && t.hp <= bailAt(t)) bailJeep(t);   // 3.32
   if (t.hp <= 0) {
     if (t.kind === 'fuel') { boom(t.x, t.y, 75); boom(t.x + 16, t.y - 12, 50); shake = Math.max(shake, 10); smokers.push({ x: t.x, y: t.y, t: 0, life: 60 }); }
     t.dead = 1; if (!friendly && t.kind !== 'fuel' && t.kind !== 'crate') run.kills++; if (!friendly) score += { tank: 100, jeep: 50, balloon: 30, drone: 40, wall: 10, tower: 150 }[t.kind] || 0; boom(t.x, t.y, t.air ? 30 : 42);
@@ -1819,7 +1876,7 @@ function step(dt) {
   }
   heli.hurt = Math.max(0, heli.hurt - dt); shake = Math.max(0, shake - dt * 30);
   heli.spin += ((heli.want ? 1 : heli.alt > 0.02 && !dead ? 0.85 : 0) - heli.spin) * Math.min(1, dt * (heli.want ? 1.8 : dead ? 1.5 : 0.5));
-  pilotStep(dt);
+  pilotStep(dt); stepRunners(dt);   // 3.32
   if (mode === 'jeep' && !dead) jeepStep(dt);
   if (VS) vsStep(dt);   // 3.18
   if (won) return;
@@ -1924,6 +1981,7 @@ function step(dt) {
     // 2.2 (the player 19:07): you can shoot incoming shells down
     for (let k = shells.length - 1; k >= 0; k--) { const sh = shells[k]; if (Math.abs(sh.x - b.x) < 16 && Math.hypot(sh.x - b.x, sh.y - b.y) < 14) { shells.splice(k, 1); boom(sh.x, sh.y, 14); done = b.hitT = true; break; } }
     if (b.jeep) {                                   // 2.3: jeep rounds hit whatever they meet, low and high
+      if (!done && hitRunner(b.x, b.y, 10)) done = true;   // 3.32
       if (!done) for (const t of targets) if (!t.dead && !(t.kind === 'jeep' && t.parked) && nearT(t, b.x, b.y, 5)) { damage(t, JGUN_DMG); done = true; puffs.push({ x: b.x, y: b.y, vx: 0, vy: 0, t: 0, life: 0.2, spark: true }); break; }
       if (!done) for (let k = mines.length - 1; k >= 0; k--) if (Math.abs(mines[k].x - b.x) < 14 && Math.hypot(mines[k].x - b.x, mines[k].y - b.y) < 12) { detonate(k); done = true; break; }
       if (done || b.t >= b.life) { if (!b.hitT && b.t >= b.life) puffs.push({ x: b.x, y: b.y, vx: 0, vy: 0, t: 0, life: 0.35, dirt: !isWater(b.x, b.y), splash: isWater(b.x, b.y) }); bullets.splice(i, 1); }
@@ -1931,6 +1989,7 @@ function step(dt) {
     }
     if (b.t < b.life * 0.6) for (const t of targets) if (t.air && !t.dead && Math.hypot(t.x - b.x, t.y - b.y) < t.r + GUN_HIT * 0.6) { damage(t, 1); run.hits++; done = true; puffs.push({ x: b.x, y: b.y, vx: 0, vy: 0, t: 0, life: 0.25, spark: true }); break; }
     if (!done && b.ground && b.t >= b.life * 0.5) for (let k = mines.length - 1; k >= 0; k--) if (Math.abs(mines[k].x - b.x) < 16 && Math.hypot(mines[k].x - b.x, mines[k].y - b.y) < 16) { detonate(k); done = b.hitT = true; break; }
+    if (!done && b.ground && b.t >= b.life * 0.5 && hitRunner(b.x, b.y, GUN_HIT)) { done = true; b.hitT = true; }   // 3.32
     if (!done && b.ground && b.t >= b.life * 0.5) for (const t of targets) if (!t.air && !t.dead && nearT(t, b.x, b.y, GUN_HIT)) { damage(t, 1); run.hits++; done = true; b.hitT = true; puffs.push({ x: b.x, y: b.y, vx: 0, vy: 0, t: 0, life: 0.25, spark: true }); break; }
     if (!done && b.ground && b.t >= b.life * 0.5) { const hc = cacheAt(b.x, b.y, 16); if (hc) { hc.hp = (hc.hp === undefined ? CACHE_HP : hc.hp) - 1; if (hc.hp <= 0) blowCache(hc); done = b.hitT = true; puffs.push({ x: b.x, y: b.y, vx: 0, vy: 0, t: 0, life: 0.25, spark: true }); } }   // 3.14
     if (!done && b.ground && b.t >= b.life * 0.5) { const hb = buildingAt(b.x, b.y); if (hb) { hurtBuilding(hb, 1); done = b.hitT = true; puffs.push({ x: b.x, y: b.y, vx: 0, vy: 0, t: 0, life: 0.3, dirt: true }); } }   // 3.11
@@ -1975,6 +2034,7 @@ function step(dt) {
     t.t += dt; t.hit = Math.max(0, t.hit - dt); if (t.dead) continue;
     if (t.kind === 'foe') continue;   // 3.18: moved by vsStep
     if (t.kind === 'jeep') {
+      if (t.safeT > 0) t.safeT -= dt;   // 3.32
       if (!t.parked && !t.stolen) {
         const nx = t.x + Math.sin(t.hd) * 70 * dt, ny = t.y - Math.cos(t.hd) * 70 * dt;
         if (isWater(nx, ny) || inBuilding(nx, ny) || nearBase(nx, ny, 160) || nx < 60 || ny < 60 || nx > W - 60 || ny > H - 60) t.hd += 1.4 + R(); else { t.x = nx; t.y = ny; }
@@ -2194,8 +2254,8 @@ function drawJeep(g, t, player) {
   g.fillStyle = '#ffe9a8'; g.fillRect(-6, -14.6, 3, 1.6); g.fillRect(3, -14.6, 3, 1.6);
   g.fillStyle = '#cfe3ea'; g.fillRect(-6.5, -5.5, 13, 2);
   g.fillStyle = 'rgba(0,0,0,0.38)'; g.fillRect(-5.5, -3, 11, 13);
-  g.fillStyle = player ? '#ffd64a' : '#4c5a2c'; g.beginPath(); g.arc(-2.6, 0, 2.6, 0, 7); g.fill();
-  if (!player) { g.fillStyle = '#4c5a2c'; g.beginPath(); g.arc(2.6, 6.5, 2.4, 0, 7); g.fill(); g.fillStyle = '#222'; g.fillRect(1.8, -2, 1.6, 8); }
+  if (player || !t.parked) { g.fillStyle = player ? '#ffd64a' : '#4c5a2c'; g.beginPath(); g.arc(-2.6, 0, 2.6, 0, 7); g.fill(); }   // 3.32: an empty (parked) jeep has no one in it
+  if (!player && !t.parked) { g.fillStyle = '#4c5a2c'; g.beginPath(); g.arc(2.6, 6.5, 2.4, 0, 7); g.fill(); g.fillStyle = '#222'; g.fillRect(1.8, -2, 1.6, 8); }
   g.strokeStyle = dark; g.lineWidth = 1.6; g.beginPath(); g.moveTo(-6.5, 3.5); g.lineTo(6.5, 3.5); g.stroke();
   if (player) {                                   // 2.3: the machine gun on its post, turned to the target
     g.save(); g.translate(0, 6); g.rotate((t.aim === undefined ? t.hd : t.aim) - t.hd);
@@ -2685,7 +2745,7 @@ function draw() {
     drawHeli(g, false, foe, FOE_INK); g.filter = 'none'; g.restore();
   }
   for (const f of flags) if (f.carrier && vis(f.x, f.y, 100)) { g.save(); g.translate(f.x + 6, f.y - 8); g.scale(0.8, 0.8); drawFlag(g, 0, 0, ...FLAG_INK[f.team]); g.restore(); }   // carried: rides on top
-  drawPilot(g);   // on top: he runs out from under the rotor
+  for (const r of runners) if (vis(r.x, r.y)) drawRunner(g, r); drawPilot(g);   // on top: he runs out from under the rotor
   if (jeep && !(dead && dead.jeep)) { drawJeep(g, jeep, true); if (flag.carried) drawFlag(g, jeep.x + 4, jeep.y + 6); }
   // balloons fly at about the helicopter's height
   for (const t of targets) if (!t.dead && t.air && t.kind !== 'foe' && vis(t.x, t.y)) { if (t.kind === 'drone') drawDrone(g, t, false); else drawBalloon(g, t, false); }
@@ -2906,7 +2966,7 @@ rec({ e: 'start', v: VERSION, versus: VS ? VS.seed : 0, TURN, FAST_K, FACE_DEAD,
 if (new URLSearchParams(location.search).has('scores')) { history.replaceState(null, '', location.pathname); setTimeout(() => showScores(() => {}), 300); }   // 3.27: widget SCORES button
 if (VS) { foeSpawn(); say('VERSUS on ' + TH.name + ': bring their red flag to your pad. First to ' + VS_WIN, 5); }
 else say('Level ' + LEVEL + ': ' + TH.name + (LEVEL > THEMES.length ? ' (harder)' : ''), 3.5);
-window.rw = { get pos() { return pos; }, centreOf, get sticksHidden() { return sticksHidden; }, stR, rstR, HOLD_MOVE, get dpr() { return dpr; }, get fps() { return fpsShow; }, RKT_ZONE, aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
+window.rw = { runners, bailJeep, swapJeep, bailAt, get pos() { return pos; }, centreOf, get sticksHidden() { return sticksHidden; }, stR, rstR, HOLD_MOVE, get dpr() { return dpr; }, get fps() { return fpsShow; }, RKT_ZONE, aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
 window.rwSet = o => { Object.assign(heli, o); if (o.x !== undefined) { cam.x = heli.x; cam.y = heli.y; } flown = turned = !!o.flown; };
 const q = new URLSearchParams(location.search);
 if (q.has('shot')) rwSet({ x: +q.get('x') || PAD.x, y: +q.get('y') || PAD.y, alt: +q.get('alt') || 0, spin: +(q.get('spin') || 0), want: q.get('alt') > 0 ? 1 : 0, hd: +(q.get('hd') || 0), vx: +(q.get('vx') || 0), vy: +(q.get('vy') || 0), flown: q.has('flown') });
