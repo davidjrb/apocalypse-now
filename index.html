@@ -55,7 +55,7 @@ let QUAL = window.AndroidLog || / wv\)/.test(navigator.userAgent) ? 3 : 1.75; co
 let fpsAcc = 0, fpsN = 0, fpsShow = 0, fpsT0 = 0;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.33';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.34';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -866,7 +866,8 @@ function padStep(dt) {
   if (s.b.gun && !pr.gun) { padGun = true; gunOn = true; }
   if (!s.b.gun && pr.gun && padGun) { padGun = false; gunOn = gunLatch; }
   if (hit('rkt')) fireRocket();
-  if (hit('land')) toggleLand();
+  if (hit('land') && !(pickActive() && pick && goPick())) toggleLand();   // 3.34: X = go to the picked one
+  { const rm = Math.hypot(s.rx, s.ry); padAimedAny = rm > PAD_AIM || padAimedAny; if (rm > PAD_AIM && pickActive()) pickToward(Math.atan2(s.ry, s.rx)); }
   if (s.b.steal) {
     padYT += dt;
     if (padYT >= JEEP_HOLD / 1000 && padYT - dt < JEEP_HOLD / 1000 && mode === 'heli') { const t = stealCandidate(); if (t) holdJeep(t); else say('Get next to a jeep and slow down, then hold Y'); }
@@ -996,6 +997,7 @@ function up(e) {
       if (now - last < 350) { stickTap[f.mode] = 0;
         if (f.mode === 'tsR') { gunLatch = !gunLatch; gunOn = gunLatch; say(gunLatch ? 'Gun ON (double-tap AIM to stop)' : 'Gun off', 1.5); }
         else if (mode === 'heli' && heli.want > 0) toggleLand();
+        else goPick();   // 3.34: landed / in a jeep / pilot running: go for what AIM picked
       } else stickTap[f.mode] = now;
     }
     return;
@@ -1298,6 +1300,7 @@ function pilotStep(dt) {
   if ((pilot.leg === 'to' || pilot.leg === 'load') && pilot.goalT && pilot.goalT.dead) { pilot.leg = 'back'; pilot.load = ''; }
   if (pilot.leg === 'load') { pilot.t -= dt; if (pilot.t <= 0) { pilot.leg = 'back'; pilot.load = pilot.goalKind;
     const c = pilot.goalT && pilot.goalT.cacheOf; if (c && --c.loads <= 0) pilot.goalT.dead = true; } return; }   // 2.4: a cache runs out
+  if (pilot.leg === 'steal' && pilot.jeepT) pilot.goal = [pilot.jeepT.x, pilot.jeepT.y];   // 3.34: follow it
   const gx = pilot.leg === 'back' ? heli.x : pilot.goal[0], gy = pilot.leg === 'back' ? heli.y : pilot.goal[1];
   const dx = gx - pilot.x, dy = gy - pilot.y, d = Math.hypot(dx, dy), v = PILOT_V * (heli.want ? 1.5 : 1);
   pilot.hd = Math.atan2(dy, dx); pilot.t += dt;
@@ -1310,7 +1313,7 @@ function pilotStep(dt) {
   if (pilot.load && navigator.vibrate) navigator.vibrate(25);
   pilot.load = '';
   if (!heli.want && pilot.base && (fuel < FUEL_MAX - 1 && baseHas(pilot.base, 'fuel') || (ammo < AMMO_MAX || rkts < RKT_MAX) && baseHas(pilot.base, 'crate'))) { pilot.leg = 'to'; pilotGoal(); }
-  else pilot.out = false;
+  else { pilot.out = false; pilot.cam = false; }
 }
 function pilotGoal() {
   const b = pilot.base, needFuel = fuel < FUEL_MAX - 1 && baseHas(b, 'fuel'), needAmmo = (ammo < AMMO_MAX || rkts < RKT_MAX) && baseHas(b, 'crate');
@@ -1340,17 +1343,88 @@ function takeJeep(t) {
   targets.splice(targets.indexOf(t), 1);
   const s = t.js || { hp: t.bailed ? Math.max(1, Math.floor(JEEP_HP * t.hp / t.max)) : JEEP_HP, fuel: JEEP_FUEL * (0.5 + R() * 0.5), ammo: Math.round(JEEP_AMMO * (0.4 + R() * 0.6)), cargo: { fuel: false, ammo: false } };
   jeep = { x: t.x, y: t.y, hd: t.hd, v: 0, vx: 0, vy: 0, hp: s.hp, fuel: s.fuel, ammo: s.ammo, cargo: { ...s.cargo }, hurt: 0, away: false, crashT: 0 };
-  mode = 'jeep'; pilot.out = false; pilot.jeepT = null; gunOn = gunLatch = false; fingers.clear();
+  mode = 'jeep'; pilot.out = false; pilot.cam = false; pilot.jeepT = null; gunOn = gunLatch = false; fingers.clear();
   if (navigator.vibrate) navigator.vibrate(40);
   say('Jeep! Drive back to the helicopter to fly', 2.5);
 }
-function leaveJeep() {
+// 3.34 (the player 11-12 01:00 + photo "With chopper landed use aim to select jeep (could be more than one), double tap fly stick
+// to go for it. Can also select the chopper again if you change your mind and just want to go back to flying"): sideways,
+// while the chopper is on the ground, or you are in a jeep, or the pilot is out running, pushing AIM picks what is that way:
+// the jeep whose bearing is nearest the push (within PICK_CONE, up to PICK_R away), or the chopper; nothing that way = the
+// chopper ("stay"). Double-tap FLY = go: the pilot runs to the picked jeep and takes it (3.32 rules), or back to the
+// chopper. From a jeep: it is parked where it stands and the pilot runs (the camera follows him); right by the chopper it
+// is the usual leaveJeep with the cargo hand-over. From a jeep only empty jeeps can be picked. Gamepad: right stick + X.
+const PICK_R = 600, PICK_CONE = 0.8;
+let pick = null;   // 'heli' | a jeep target | null
+function pickActive() {
+  if (dead || won || !sticksOn() && !padAimedAny) return false;
+  return mode === 'jeep' || (mode === 'heli' && heli.alt === 0 && !heli.want) || (mode === 'heli' && pilot.out && pilot.leg !== 'to' && pilot.leg !== 'load');
+}
+let padAimedAny = false;
+const pickFrom = () => mode === 'jeep' && jeep ? jeep : pilot.out ? pilot : heli;
+function pickCands() {
+  const o = pickFrom(), out = [];
+  for (const t of targets) if (t.kind === 'jeep' && !t.dead && (!t.stolen || t === pilot.jeepT) && (mode === 'heli' || t.parked) && Math.hypot(t.x - o.x, t.y - o.y) < PICK_R) out.push(t);
+  return out;
+}
+function pickToward(a) {
+  const o = pickFrom(); let best = null, bd = PICK_CONE;
+  const list = pickCands(); if (o !== heli) list.push('heli');
+  for (const c of list) {
+    const x = c === 'heli' ? heli.x : c.x, y = c === 'heli' ? heli.y : c.y;
+    const d = Math.abs(ang(a - Math.atan2(y - o.y, x - o.x)));
+    if (d < bd) { bd = d; best = c; }
+  }
+  pick = best || 'heli';
+}
+function pickStep() {
+  if (!pickActive()) { pick = null; return; }
+  if (pick && pick !== 'heli' && (pick.dead || !pickCands().includes(pick))) pick = null;
+  const f = [...fingers.values()].find(o => o.mode === 'tsR');
+  if (f && Math.hypot(f.x - f.ox, f.y - f.oy) > TS_R * 0.45) pickToward(Math.atan2(f.y - f.oy, f.x - f.ox));
+}
+function runTo(t) {   // the pilot (already out) heads for t: a jeep or 'heli'
+  if (pilot.jeepT && pilot.jeepT !== t) pilot.jeepT.stolen = false;
+  if (t === 'heli') { pilot.leg = 'back'; pilot.jeepT = null; pilot.load = ''; }
+  else { t.stolen = true; pilot.leg = 'steal'; pilot.jeepT = t; pilot.goal = [t.x, t.y]; pilot.load = ''; }
+}
+function goPick() {
+  const t = pick; if (!t) return false;
+  if (mode === 'jeep' && jeep) {
+    if (t === 'heli' && Math.hypot(jeep.x - heli.x, jeep.y - heli.y) < 200) { leaveJeep(); pick = null; return true; }
+    const x = jeep.x, y = jeep.y; leaveJeep(true);
+    Object.assign(pilot, { out: true, x, y, base: null, load: '', cam: true, t: 0 }); runTo(t); pick = null;
+    say(t === 'heli' ? 'Running back to the chopper' : 'Running to that jeep', 2); return true;
+  }
+  if (mode !== 'heli') return false;
+  if (pilot.out) { runTo(t); pick = null; return true; }
+  if (t === 'heli') { say('Push FLY to take off', 1.5); return true; }
+  Object.assign(pilot, { out: true, x: heli.x + Math.cos(heli.hd) * 16, y: heli.y + Math.sin(heli.hd) * 16, base: null, load: '', cam: false, t: 0 });
+  runTo(t); pick = null; say('Going for the jeep', 1.5); return true;
+}
+function drawPick(g) {
+  if (!pickActive()) return;
+  const cands = pickCands(), o = pickFrom();
+  g.lineWidth = 2; g.strokeStyle = 'rgba(255,255,255,0.45)';
+  for (const c of cands) if (c !== pick) { g.beginPath(); g.arc(c.x, c.y, 24, 0, 7); g.stroke(); }
+  if (!pick) return;
+  const x = pick === 'heli' ? heli.x : pick.x, y = pick === 'heli' ? heli.y : pick.y, r = pick === 'heli' ? 46 : 28, k = r + 6;
+  g.strokeStyle = '#ffd64a'; g.lineWidth = 4;
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { g.beginPath(); g.moveTo(x + sx * k, y + sy * (k - 12)); g.lineTo(x + sx * k, y + sy * k); g.lineTo(x + sx * (k - 12), y + sy * k); g.stroke(); }
+  if (pick !== 'heli' || o !== heli) {
+    g.fillStyle = '#ffd64a'; g.font = '800 13px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom';
+    g.fillText(pick === 'heli' ? 'CHOPPER: DOUBLE-TAP FLY' : 'DOUBLE-TAP FLY', x, y - k - 4); g.textAlign = 'left'; g.textBaseline = 'top';
+  }
+}
+function leaveJeep(noHandover) {
   // 2.4 (the player 11-05 00:20 "the jeep should be able to replenish the chopper"): a fuel can / ammo box the jeep carries
   // goes into the chopper when you drive back to it (only if the chopper needs it; otherwise it stays in the jeep).
   const c = jeep.cargo, got = [];
+  if (!noHandover) {   // 3.34: not when the pilot leaves it far from the chopper
   if (c.fuel && fuel < FUEL_MAX - 1) { fuel = Math.min(FUEL_MAX, fuel + FUEL_MAX * JEEP_CAN); c.fuel = false; got.push('fuel'); }
   if (c.ammo && (ammo < AMMO_MAX || rkts < RKT_MAX)) { ammo = Math.min(AMMO_MAX, ammo + JEEP_BOX); rkts = Math.min(RKT_MAX, rkts + 2); c.ammo = false; got.push('ammo'); }
   if (got.length) { say('Chopper gets the ' + got.join(' and ') + ' from the jeep', 2.5); if (navigator.vibrate) navigator.vibrate(40); }
+  }
   targets.push({ kind: 'jeep', x: jeep.x, y: jeep.y, hd: jeep.hd, hp: 3, max: 3, r: 14, vx: 0, vy: 0, t: 0, hit: 0, dead: 0, parked: true,
     js: { hp: jeep.hp, fuel: jeep.fuel, ammo: jeep.ammo, cargo: { ...c } } });
   if (flag.carried) { flag.carried = false; flag.x = jeep.x; flag.y = jeep.y; say('The flag stays with the jeep', 2.5); }
@@ -1920,7 +1994,7 @@ function step(dt) {
   }
   heli.hurt = Math.max(0, heli.hurt - dt); shake = Math.max(0, shake - dt * 30);
   heli.spin += ((heli.want ? 1 : heli.alt > 0.02 && !dead ? 0.85 : 0) - heli.spin) * Math.min(1, dt * (heli.want ? 1.8 : dead ? 1.5 : 0.5));
-  pilotStep(dt); stepRunners(dt);   // 3.32
+  pilotStep(dt); stepRunners(dt); pickStep();   // 3.32, 3.34
   if (mode === 'jeep' && !dead) jeepStep(dt);
   if (VS) vsStep(dt);   // 3.18
   if (won) return;
@@ -2166,7 +2240,8 @@ function step(dt) {
   for (let i = dust.length - 1; i >= 0; i--) { const p = dust[i]; p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96; if (p.t > p.life) dust.splice(i, 1); }
   // camera: leads in the direction of travel, and a little toward where the nose points
   if (!dead) reveal(P.x, P.y, mode === 'jeep' ? 600 : 500 + 500 * heli.alt);
-  const lx = P.x + P.vx * 0.45 + Math.sin(P.hd) * 60, ly = P.y + P.vy * 0.45 - Math.cos(P.hd) * 60;
+  let lx = P.x + P.vx * 0.45 + Math.sin(P.hd) * 60, ly = P.y + P.vy * 0.45 - Math.cos(P.hd) * 60;
+  if (pilot.out && pilot.cam) { lx = pilot.x; ly = pilot.y; }   // 3.34: the pilot running from a jeep
   cam.x += (lx - cam.x) * Math.min(1, dt * 3); cam.y += (ly - cam.y) * Math.min(1, dt * 3);
   cam.x = Math.max(wvw / 2, Math.min(W - wvw / 2, cam.x)); cam.y = Math.max(wvh / 2, Math.min(H - wvh / 2, cam.y));
   prefetchTile(cam.x, cam.y, P.vx, P.vy);
@@ -2754,6 +2829,7 @@ function draw() {
     const dj = jeep ? Math.hypot(m.x - jeep.x, m.y - jeep.y) : 1e9, dh = heli.alt > 0.3 ? Math.hypot(m.x - heli.x, m.y - heli.y) : 1e9;
     const a = Math.max(Math.min(1, (MINE_SEE_J - dj) / 80), Math.min(1, (MINE_SEE_H - dh) / 120)); if (a > 0) drawMine(g, m, a);
   }
+  drawPick(g);   // 3.34
   for (const f of fingers.values()) if (f.jeepHold && !f.jeepHold.dead) {   // 3.9: the hold ring filling on the jeep
     const t = f.jeepHold, k = Math.min(1, (performance.now() - f.t) / JEEP_HOLD);
     g.lineWidth = 5; g.strokeStyle = 'rgba(0,0,0,0.45)'; g.beginPath(); g.arc(t.x, t.y, 30, 0, 7); g.stroke();
@@ -3037,7 +3113,7 @@ rec({ e: 'start', v: VERSION, versus: VS ? VS.seed : 0, TURN, FAST_K, FACE_DEAD,
 if (new URLSearchParams(location.search).has('scores')) { history.replaceState(null, '', location.pathname); setTimeout(() => showScores(() => {}), 300); }   // 3.27: widget SCORES button
 if (VS) { foeSpawn(); say('VERSUS on ' + TH.name + ': bring their red flag to your pad. First to ' + VS_WIN, 5); }
 else say('Level ' + LEVEL + ': ' + TH.name + (LEVEL > THEMES.length ? ' (harder)' : ''), 3.5);
-window.rw = { ngR, exR, newerV, newGame, exitGame, runners, bailJeep, swapJeep, bailAt, get pos() { return pos; }, centreOf, get sticksHidden() { return sticksShow === 'none'; }, get sticksShow() { return sticksShow; }, stR, rstR, HOLD_MOVE, get dpr() { return dpr; }, get fps() { return fpsShow; }, RKT_ZONE, aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
+window.rw = { get pick() { return pick; }, set pick(v) { pick = v; }, pickToward, goPick, pickActive, pickCands, ngR, exR, newerV, newGame, exitGame, runners, bailJeep, swapJeep, bailAt, get pos() { return pos; }, centreOf, get sticksHidden() { return sticksShow === 'none'; }, get sticksShow() { return sticksShow; }, stR, rstR, HOLD_MOVE, get dpr() { return dpr; }, get fps() { return fpsShow; }, RKT_ZONE, aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
 window.rwSet = o => { Object.assign(heli, o); if (o.x !== undefined) { cam.x = heli.x; cam.y = heli.y; } flown = turned = !!o.flown; };
 const q = new URLSearchParams(location.search);
 if (q.has('shot')) rwSet({ x: +q.get('x') || PAD.x, y: +q.get('y') || PAD.y, alt: +q.get('alt') || 0, spin: +(q.get('spin') || 0), want: q.get('alt') > 0 ? 1 : 0, hd: +(q.get('hd') || 0), vx: +(q.get('vx') || 0), vy: +(q.get('vy') || 0), flown: q.has('flown') });
