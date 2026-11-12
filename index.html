@@ -46,6 +46,9 @@
 const W = 24000, H = 24000;                       // world size in px (1.2: ten times 0.x's 2400 each way)
 const cv = document.getElementById('c'), cx = cv.getContext('2d');
 let vw = 0, vh = 0, dpr = 1;
+// 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
+// area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
+const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
 // we don't force it again). manifest.json lets Firefox's menu add it to the home screen as a full-screen app.
@@ -53,7 +56,7 @@ function resize() {
   dpr = Math.min(window.devicePixelRatio || 1, 3);
   const V = window.visualViewport;
   vw = Math.round(V ? V.width : window.innerWidth); vh = Math.round(V ? V.height : window.innerHeight);
-  cv.width = Math.round(vw * dpr); cv.height = Math.round(vh * dpr); cv.style.width = vw + 'px'; cv.style.height = vh + 'px';
+  cv.width = Math.round(vw * dpr); cv.height = Math.round(vh * dpr); cv.style.width = vw + 'px'; cv.style.height = vh + 'px'; wvw = vw / Z; wvh = vh / Z;
 }
 window.addEventListener('resize', resize); if (window.visualViewport) window.visualViewport.addEventListener('resize', resize); resize();
 let fsTried = false;
@@ -585,6 +588,7 @@ const btn = { gun: { x: 0, y: 0, r: 40, down: null, label: 'GUN' }, rkt: { x: 0,
 const TS_R = 60;
 const coarse = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch (e) { return false; } })();
 const sticksOn = () => coarse && vw > vh;
+function setZoom() { Z = sticksOn() ? ZOOM_SIDE : 1; wvw = vw / Z; wvh = vh / Z; }
 // 1.8 (the player 11-04 17:58): the buttons stay where they are (no moving them), and GUN fires only while held.
 localStorage.removeItem('apocalypse.buttons');
 function placeButtons() {
@@ -623,7 +627,7 @@ const JEEP_PRESS = 55, JEEP_HOLD = 500;
 let stealAsk = false;
 function jeepUnder(x, y) {
   if (mode !== 'heli' || dead || pilot.out) return null;
-  const wx = cam.x - vw / 2 + x, wy = cam.y - vh / 2 + y; let best = null, bd = JEEP_PRESS;
+  const wx = cam.x - wvw / 2 + x / Z, wy = cam.y - wvh / 2 + y / Z; let best = null, bd = JEEP_PRESS;
   for (const t of targets) if (t.kind === 'jeep' && !t.dead && !t.stolen) { const d = Math.hypot(t.x - wx, t.y - wy); if (d < bd) { bd = d; best = t; } }
   return best;
 }
@@ -1591,7 +1595,7 @@ function restart() {
 // Each side: a pad, a flag on it, a chopper. A chopper is one state object moved by chopperMove; yours gets its input
 // from your fingers, theirs from foeThink (input = { tx, ty: wanted velocity, hd: wanted nose, lift, gun }). A server
 // later = a third input source; nothing else changes. A flag is picked up / returned by setting down within FLAG_R of it.
-const FLAG_R = 60, VS_WIN = 3, FOE_V = MAXV * 0.75, FOE_YAW = 2.4, FOE_SEE = 620, FOE_GUN = 0.5, FOE_SPREAD = 0.16, FOE_SHOT_V = 700, FOE_BACK = 6, FOE_PTS = 300;
+const FLAG_R = 60, VS_WIN = 3, FOE_V = MAXV,   /* 3.22: same top speed as you ('same limits', 22:07) */ FOE_YAW = 2.4, FOE_SEE = 620, FOE_GUN = 0.5, FOE_SPREAD = 0.16, FOE_SHOT_V = 700, FOE_BACK = 6, FOE_PTS = 300;
 const vs = { me: 0, foe: 0 };
 const flags = VS ? [{ team: 'me', home: PAD, x: PAD.x + 30, y: PAD.y - 30, carrier: null }, { team: 'foe', home: FOE_PAD, x: FOE_PAD.x + 30, y: FOE_PAD.y - 30, carrier: null }] : [];
 const atHome = f => Math.hypot(f.x - f.home.x - 30, f.y - f.home.y + 30) < 1;
@@ -1609,7 +1613,7 @@ function foeSpawn() {
 // are while you're inside its view: a box your screen's size around it (what you'd see from there). Out of view it goes
 // to where it last saw you; a thief it can't see is waited for at your pad (where the flag has to go).
 const FOE_SHOT_COST = 10;
-const foeSees = (c, P) => Math.abs(P.x - c.x) < vw / 2 && Math.abs(P.y - c.y) < vh / 2;
+const foeSees = (c, P) => Math.abs(P.x - c.x) < wvw / 2 && Math.abs(P.y - c.y) < wvh / 2;
 function vsDrop(who) {   // the carrier went down: the flag falls where it is
   for (const f of flags) if (f.carrier === who) { f.carrier = null; say(who === 'me' ? 'You dropped their flag' : 'They dropped your flag!', 2.5); }
 }
@@ -1950,7 +1954,7 @@ function step(dt) {
   // smoke from wrecks, and from the helicopter when it's badly hurt
   for (let i = smokers.length - 1; i >= 0; i--) {
     const k = smokers[i]; k.t += dt; if (k.t > k.life) { smokers.splice(i, 1); continue; }
-    if (Math.abs(k.x - cam.x) < vw && Math.abs(k.y - cam.y) < vh && R() < dt * 8 * (1 - k.t / k.life))
+    if (Math.abs(k.x - cam.x) < wvw && Math.abs(k.y - cam.y) < wvh && R() < dt * 8 * (1 - k.t / k.life))
       puffs.push({ x: k.x + (R() - 0.5) * 10, y: k.y + (R() - 0.5) * 10, vx: 12 + R() * 10, vy: -8 - R() * 10, t: 0, life: 1.6 + R(), smoke: true, rise: true });
   }
   if (!dead && heli.hp <= 2 && heli.alt > 0 && R() < dt * (heli.hp === 1 ? 22 : 9))
@@ -1967,7 +1971,7 @@ function step(dt) {
   if (!dead) reveal(P.x, P.y, mode === 'jeep' ? 600 : 500 + 500 * heli.alt);
   const lx = P.x + P.vx * 0.45 + Math.sin(P.hd) * 60, ly = P.y + P.vy * 0.45 - Math.cos(P.hd) * 60;
   cam.x += (lx - cam.x) * Math.min(1, dt * 3); cam.y += (ly - cam.y) * Math.min(1, dt * 3);
-  cam.x = Math.max(vw / 2, Math.min(W - vw / 2, cam.x)); cam.y = Math.max(vh / 2, Math.min(H - vh / 2, cam.y));
+  cam.x = Math.max(wvw / 2, Math.min(W - wvw / 2, cam.x)); cam.y = Math.max(wvh / 2, Math.min(H - wvh / 2, cam.y));
   prefetchTile(cam.x, cam.y, P.vx, P.vy);
   if (msgT > 0) msgT -= dt;
 }
@@ -2357,8 +2361,8 @@ function drawWorker(g, w) {
 }
 function drawWorkers(g, ox, oy) {
   if (!TH.workers) return;
-  for (let i = Math.floor((ox - 120) / TILE); i <= Math.floor((ox + vw + 120) / TILE); i++) for (let j = Math.floor((oy - 120) / TILE); j <= Math.floor((oy + vh + 120) / TILE); j++)
-    for (let k = 0; k < 4; k++) { const w = workerAt(i, j, k); if (w && w.x > ox - 20 && w.x < ox + vw + 20 && w.y > oy - 20 && w.y < oy + vh + 20) drawWorker(g, w); }
+  for (let i = Math.floor((ox - 120) / TILE); i <= Math.floor((ox + wvw + 120) / TILE); i++) for (let j = Math.floor((oy - 120) / TILE); j <= Math.floor((oy + wvh + 120) / TILE); j++)
+    for (let k = 0; k < 4; k++) { const w = workerAt(i, j, k); if (w && w.x > ox - 20 && w.x < ox + wvw + 20 && w.y > oy - 20 && w.y < oy + wvh + 20) drawWorker(g, w); }
 }
 function killWorker(w) { deadWorkers.add(w.id); if (!isWater(w.x, w.y)) addScorch(w.x, w.y, 'squish'); mist(w.x, w.y, 8, ['255,225,74', '232,32,58', '255,255,255']); innocent('candy worker'); }
 function drawMonkey(g, x, y, a, swing) {
@@ -2388,12 +2392,12 @@ function monkeyAt(ts, i, j, k) {
 }
 function drawMonkeys(g, ox, oy) {
   if (!TH.fauna) return;
-  const i0 = Math.floor((ox - 60) / TILE), i1 = Math.floor((ox + vw + 60) / TILE), j0 = Math.floor((oy - 60) / TILE), j1 = Math.floor((oy + vh + 60) / TILE);
+  const i0 = Math.floor((ox - 60) / TILE), i1 = Math.floor((ox + wvw + 60) / TILE), j0 = Math.floor((oy - 60) / TILE), j1 = Math.floor((oy + wvh + 60) / TILE);
   for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
     const ts = tileTrees(i, j);
     for (let k = 0; k < ts.length; k++) {
       const m = monkeyAt(ts, i, j, k); if (!m) continue; const { x, y, a, lift, ph } = m;
-      if (x < ox - 40 || x > ox + vw + 40 || y < oy - 40 || y > oy + vh + 40) continue;
+      if (x < ox - 40 || x > ox + wvw + 40 || y < oy - 40 || y > oy + wvh + 40) continue;
       if (lift) { g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(x + 6 + lift * 14, y + 6 + lift * 14, 6, 4, 0, 0, 7); g.fill(); }
       const sc = 1 + lift * 0.35; g.save(); g.translate(x, y - lift * 4); g.scale(sc, sc);
       drawMonkey(g, 0, 0, a, lift ? 1 : Math.sin(T * 3 + ph) * 0.4); g.restore();
@@ -2417,14 +2421,15 @@ function drawSticks(g) {   // 3.20: a ring where the thumb landed + the knob; fa
 }
 function draw() {
   const g = cx;
-  g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const sx = shake ? (Math.random() - 0.5) * shake : 0, sy = shake ? (Math.random() - 0.5) * shake : 0;
-  const ox = Math.round((cam.x - vw / 2 + sx) * dpr) / dpr, oy = Math.round((cam.y - vh / 2 + sy) * dpr) / dpr;
-  for (let i = Math.max(0, Math.floor(ox / TILE)); i * TILE < Math.min(W, ox + vw); i++)
-    for (let j = Math.max(0, Math.floor(oy / TILE)); j * TILE < Math.min(H, oy + vh); j++)
+  setZoom();   // 3.22
+  g.setTransform(dpr * Z, 0, 0, dpr * Z, 0, 0);
+  const sx = shake ? (Math.random() - 0.5) * shake : 0, sy = shake ? (Math.random() - 0.5) * shake : 0, dz = dpr * Z;
+  const ox = Math.round((cam.x - wvw / 2 + sx) * dz) / dz, oy = Math.round((cam.y - wvh / 2 + sy) * dz) / dz;
+  for (let i = Math.max(0, Math.floor(ox / TILE)); i * TILE < Math.min(W, ox + wvw); i++)
+    for (let j = Math.max(0, Math.floor(oy / TILE)); j * TILE < Math.min(H, oy + wvh); j++)
       g.drawImage(getTile(i, j), 1, 1, TILE + 0.5, TILE + 0.5, i * TILE - ox, j * TILE - oy, TILE + 0.5, TILE + 0.5);   // +0.5 hides seams
   g.translate(-ox, -oy);
-  const vis = (x, y, m = 80) => x > ox - m && x < ox + vw + m && y > oy - m && y < oy + vh + m;
+  const vis = (x, y, m = 80) => x > ox - m && x < ox + wvw + m && y > oy - m && y < oy + wvh + m;
   for (const p of dust) {
     const f = p.t / p.life;
     g.strokeStyle = p.w ? `rgba(225,240,255,${0.45 * (1 - f)})` : `rgba(215,225,170,${0.32 * (1 - f)})`;
@@ -2520,7 +2525,7 @@ function draw() {
   // 1.8 (the player 11-04 17:58 "remove all visual effects of moving the helicopter, no squiggly lines"): no finger
   // overlays at all (press dot, drag line, curve trail, BRAKE). Instead: an arrow to the base when it is off screen.
   {
-    const px = PAD.x - ox, py = PAD.y - oy, M = 30;
+    const px = (PAD.x - ox) * Z, py = (PAD.y - oy) * Z, M = 30;
     if (!dead && (px < -M || px > vw + M || py < -M || py > vh + M)) {
       const L = 28, T = 140, Rr = vw - 28, B = vh - 130, cxs = vw / 2, cys = (T + B) / 2;
       const dx = px - cxs, dy = py - cys, k = Math.min(dx > 0 ? (Rr - cxs) / dx : dx < 0 ? (L - cxs) / dx : 1e9, dy > 0 ? (B - cys) / dy : dy < 0 ? (T - cys) / dy : 1e9);
@@ -2732,11 +2737,11 @@ function frame(now) {
   draw();
   requestAnimationFrame(frame);
 }
-rec({ e: 'start', v: '3.21', versus: VS ? VS.seed : 0, TURN, FAST_K, FACE_DEAD, FACE_RATE, vw, vh, dpr: devicePixelRatio, level: LEVEL, MAXV, DRAG_R, CURVE_LEN, R_NONE, R_FULL });
+rec({ e: 'start', v: '3.22', versus: VS ? VS.seed : 0, TURN, FAST_K, FACE_DEAD, FACE_RATE, vw, vh, dpr: devicePixelRatio, level: LEVEL, MAXV, DRAG_R, CURVE_LEN, R_NONE, R_FULL });
 // test hooks (screenshots, scripted checks)
 if (VS) { foeSpawn(); say('VERSUS on ' + TH.name + ': bring their red flag to your pad. First to ' + VS_WIN, 5); }
 else say('Level ' + LEVEL + ': ' + TH.name + (LEVEL > THEMES.length ? ' (harder)' : ''), 3.5);
-window.rw = { sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
+window.rw = { get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
 window.rwSet = o => { Object.assign(heli, o); if (o.x !== undefined) { cam.x = heli.x; cam.y = heli.y; } flown = turned = !!o.flown; };
 const q = new URLSearchParams(location.search);
 if (q.has('shot')) rwSet({ x: +q.get('x') || PAD.x, y: +q.get('y') || PAD.y, alt: +q.get('alt') || 0, spin: +(q.get('spin') || 0), want: q.get('alt') > 0 ? 1 : 0, hd: +(q.get('hd') || 0), vx: +(q.get('vx') || 0), vy: +(q.get('vy') || 0), flown: q.has('flown') });
