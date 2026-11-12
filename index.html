@@ -48,7 +48,7 @@ const cv = document.getElementById('c'), cx = cv.getContext('2d');
 let vw = 0, vh = 0, dpr = 1;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.25';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.26';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -615,7 +615,7 @@ const scheme = 'drag';
 const DRAG_R = 110;     // press-point distance for top speed
 const STICK_R = 60, STICK_V = 210;
 const miniR = { x: 0, y: 12, s: 96 };
-const onBtn = (x, y) => Object.values(btn).find(b => (mode === 'heli' || b === btn.gun) && (b !== btn.land || sticksOn()) && Math.hypot(x - b.x, y - b.y) < b.r + (sticksOn() ? 14 : 10));
+const onBtn = (x, y) => Object.values(btn).find(b => (mode === 'heli' || b === btn.gun) && (b !== btn.land || sticksOn() && heli.want > 0) && Math.hypot(x - b.x, y - b.y) < b.r + (sticksOn() ? 14 : 10));
 
 // ---------- touch ----------
 const fingers = new Map();               // steering pointers: id -> {ox, oy, x, y, t, path, mode, lastA}
@@ -2619,8 +2619,8 @@ function draw() {
   placeButtons();
   for (const b of Object.values(btn)) {
     if (mode === 'jeep' && b !== btn.gun) continue;   // 2.3: the jeep has the gun only
-    if (b === btn.land && !sticksOn()) continue;
-    if (b === btn.land) b.label = heli.want ? 'LAND' : 'LIFT';
+    if (b === btn.land && !(sticksOn() && heli.want > 0)) continue;   // 3.26 (the player 22:41 "Lift button is useless"): LAND only, in the air; the stick takes off
+    if (b === btn.land) b.label = 'LAND';
     g.globalAlpha = sticksOn() ? 0.75 : 1;
     const on = b === btn.gun ? gunOn : b.down !== null, cool = b === btn.rkt && rktCool > 0;
     g.fillStyle = on ? 'rgba(255,200,80,0.55)' : 'rgba(0,0,0,0.38)'; g.beginPath(); g.arc(b.x, b.y, b.r, 0, 7); g.fill();
