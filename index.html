@@ -55,7 +55,7 @@ let QUAL = window.AndroidLog || / wv\)/.test(navigator.userAgent) ? 3 : 1.75; co
 let fpsAcc = 0, fpsN = 0, fpsShow = 0, fpsT0 = 0;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.34';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.35';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -854,6 +854,10 @@ function padStep(dt) {
     if (f) { const L = 8 + (m - PAD_DEAD) / (1 - PAD_DEAD) * (DRAG_R - 8); f.x = lx / m * L; f.y = ly / m * L; }
   } else if (f) padDrop();   // 3.25 (the player 22:30 "when you let go of left joystick it keeps its speed just like before"): centred = glide on, like letting go of a drag
   // nose: right stick if pushed, else where the left stick points (air only; the jeep steers itself from the finger)
+  if (mode === 'jeep' && jeep) {   // 3.35: AIM pushed = aim + fire while held; let go = back to the double-tap state
+    if (Math.hypot(s.rx, s.ry) > PAD_AIM) { jeep.aimHold = Math.atan2(s.rx, -s.ry); jeep.manual = true; gunOn = true; }
+    else if (jeep.manual) { jeep.manual = false; gunOn = gunLatch; }
+  }
   if (mode === 'heli' && heli.alt > 0.35) {
     const rm = Math.hypot(s.rx, s.ry);
     // 3.25 (the player 11-11 22:29 "Left js: up down left right relative to map. Right js: direction of helicopter"): the left
@@ -995,7 +999,7 @@ function up(e) {
     if (now - f.t < 250 && Math.hypot(f.x - f.ox, f.y - f.oy) < 14 && !f.held) {
       const last = stickTap[f.mode];
       if (now - last < 350) { stickTap[f.mode] = 0;
-        if (f.mode === 'tsR') { gunLatch = !gunLatch; gunOn = gunLatch; say(gunLatch ? 'Gun ON (double-tap AIM to stop)' : 'Gun off', 1.5); }
+        if (f.mode === 'tsR') { gunLatch = !gunLatch; gunOn = gunLatch; say(mode === 'jeep' ? (gunLatch ? 'Auto aim ON (double-tap AIM to stop)' : 'Auto aim off') : gunLatch ? 'Gun ON (double-tap AIM to stop)' : 'Gun off', 1.5); }
         else if (mode === 'heli' && heli.want > 0) toggleLand();
         else goPick();   // 3.34: landed / in a jeep / pilot running: go for what AIM picked
       } else stickTap[f.mode] = now;
@@ -1358,7 +1362,8 @@ const PICK_R = 600, PICK_CONE = 0.8;
 let pick = null;   // 'heli' | a jeep target | null
 function pickActive() {
   if (dead || won || !sticksOn() && !padAimedAny) return false;
-  return mode === 'jeep' || (mode === 'heli' && heli.alt === 0 && !heli.want) || (mode === 'heli' && pilot.out && pilot.leg !== 'to' && pilot.leg !== 'load');
+  // 3.35: in a jeep AIM aims (and fires); it also picks while the jeep is stopped
+  return (mode === 'jeep' && jeep && Math.hypot(jeep.vx, jeep.vy) < 30) || (mode === 'heli' && heli.alt === 0 && !heli.want) || (mode === 'heli' && pilot.out && pilot.leg !== 'to' && pilot.leg !== 'load');
 }
 let padAimedAny = false;
 const pickFrom = () => mode === 'jeep' && jeep ? jeep : pilot.out ? pilot : heli;
@@ -1375,7 +1380,7 @@ function pickToward(a) {
     const d = Math.abs(ang(a - Math.atan2(y - o.y, x - o.x)));
     if (d < bd) { bd = d; best = c; }
   }
-  pick = best || 'heli';
+  pick = best || (mode === 'jeep' ? null : 'heli');   // 3.35: in a jeep AIM also aims the gun, so no chopper brackets unless you point at it
 }
 function pickStep() {
   if (!pickActive()) { pick = null; return; }
@@ -1519,8 +1524,14 @@ function jeepStep(dt) {
 }
 function jeepMove(dt, brake = false) {   // 3.12: shared by both jeep schemes: turret, movement, collisions
   const j = jeep, fx = Math.sin(j.hd), fy = -Math.cos(j.hd), vf = j.vx * fx + j.vy * fy, vl = -j.vx * fy + j.vy * fx;
-  // 2.3: the gun turret turns to the closest enemy in range (straight ahead if none)
-  { const tg = jeepTarget(); const want = tg ? Math.atan2(tg.x - j.x, -(tg.y - j.y)) : j.hd; j.aim = j.aim === undefined ? j.hd : j.aim;
+  // 2.3: the gun turret turned to the closest enemy in range. 3.35 (the player 11-12 01:21 "Include aim button for jeep, rename
+  // fly stick in jeep. Remove auto aim"): no auto aim. The turret points where the AIM stick (or a controller's right stick)
+  // last pointed (j.aimHold, a map direction, held on release); never pointed yet = straight ahead.
+  // 3.35 (01:25 "Bring back Autoaim but only when aim is double tapped otherwise one is simply shooting while holding (and
+  // aiming)"): AIM pushed = the gun fires that way while held (j.manual); double-tap AIM = gun on WITH auto aim (gunLatch),
+  // the turret turning to the closest enemy as before 3.35; double-tap again = off.
+  { const tg = gunLatch && !j.manual ? jeepTarget() : null, rest = j.aimHold === undefined ? j.hd : j.aimHold;
+    const want = j.manual ? j.aimHold : tg ? Math.atan2(tg.x - j.x, -(tg.y - j.y)) : rest; j.aim = j.aim === undefined ? j.hd : j.aim;
     j.aim = ang(j.aim + Math.max(-8 * dt, Math.min(8 * dt, ang(want - j.aim)))); j.tgt = tg; }
   // move; a solid thing in the way bounces it back (water just stops it)
   const sx = j.vx * dt, sy = j.vy * dt; let impact = 0;
@@ -2678,7 +2689,7 @@ function drawMonkeys(g, ox, oy) {
 }
 
 function drawStickRests(g) {   // 3.33: on the big map, where FLY and AIM rest (hold to move)
-  for (const [k, lab] of [['tsL', 'FLY'], ['tsR', 'AIM']]) {
+  for (const [k, lab] of [['tsL', mode === 'jeep' ? 'DRIVE' : 'FLY'], ['tsR', 'AIM']]) {
     const [x, y] = centreOf(k);
     g.globalAlpha = 0.85; g.strokeStyle = '#fff'; g.lineWidth = 2.5; g.fillStyle = 'rgba(0,0,0,0.35)';
     g.beginPath(); g.arc(x, y, TS_R, 0, 7); g.fill(); g.stroke();
@@ -2696,19 +2707,18 @@ function drawStickRests(g) {   // 3.33: on the big map, where FLY and AIM rest (
   g.textAlign = 'left'; g.textBaseline = 'top';
 }
 function drawSticks(g) {   // 3.20: a ring where the thumb landed + the knob; faint rings where to put thumbs when idle
-  const rest = { tsL: [...centreOf('tsL'), 'FLY'], tsR: [...centreOf('tsR'), mode === 'jeep' ? '' : 'AIM'] };   // 3.33: movable
+  const rest = { tsL: [...centreOf('tsL'), mode === 'jeep' ? 'DRIVE' : 'FLY'], tsR: [...centreOf('tsR'), 'AIM'] };   // 3.33: movable; 3.35 jeep: DRIVE + AIM
   for (const side of ['tsL', 'tsR']) {
     if (!showStick(side)) continue;   // 3.33
     const f = [...fingers.values()].find(o => o.mode === side);
-    if (side === 'tsR' && mode === 'jeep' && !f) continue;
     const ox = f ? f.ox : rest[side][0], oy = f ? f.oy : rest[side][1];
     const gunRing = side === 'tsR' && gunLatch;   // 3.29: gun on = the AIM ring glows
     g.globalAlpha = f ? 0.55 : gunRing ? 0.6 : 0.28; g.strokeStyle = gunRing ? '#ffb347' : '#fff'; g.lineWidth = gunRing ? 4 : 2.5; g.fillStyle = gunRing ? 'rgba(255,150,40,0.18)' : 'rgba(0,0,0,0.25)';
     g.beginPath(); g.arc(ox, oy, TS_R, 0, 7); g.fill(); g.stroke();
     let dx = f ? f.x - ox : 0, dy = f ? f.y - oy : 0; const d = Math.hypot(dx, dy); if (d > TS_R) { dx *= TS_R / d; dy *= TS_R / d; }
     g.fillStyle = 'rgba(255,255,255,0.75)'; g.beginPath(); g.arc(ox + dx, oy + dy, 22, 0, 7); g.fill();
-    if (!f) { g.fillStyle = '#000'; g.font = '700 11px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(gunRing ? 'GUN ON' : rest[side][2], ox, oy); }
-    else if (gunRing) { g.fillStyle = '#ffb347'; g.font = '800 11px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom'; g.fillText('GUN ON', ox, oy - TS_R - 4); }
+    if (!f) { g.fillStyle = '#000'; g.font = '700 11px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(gunRing ? (mode === 'jeep' ? 'AUTO' : 'GUN ON') : rest[side][2], ox, oy); }
+    else if (gunRing) { g.fillStyle = '#ffb347'; g.font = '800 11px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom'; g.fillText(mode === 'jeep' ? 'AUTO AIM' : 'GUN ON', ox, oy - TS_R - 4); }
     g.globalAlpha = 1;
   }
 }
@@ -2747,7 +2757,7 @@ function drawHudStrip(g) {
     g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(x, y, seg, 5);
     g.fillStyle = low ? '#ff3a2a' : col; g.fillRect(x, y, seg * Math.max(0, Math.min(1, v)), 5);
   });
-  if (!showStick('tsR') && gunLatch && mode === 'heli') { g.globalAlpha = 0.95; g.font = '800 11px system-ui, sans-serif'; g.textAlign = 'left'; g.fillStyle = '#ffb347'; g.fillText('GUN ON', x0 + w + 12, y + 5); }   // 3.31: no AIM ring to glow
+  if (!showStick('tsR') && gunLatch) { g.globalAlpha = 0.95; g.font = '800 11px system-ui, sans-serif'; g.textAlign = 'left'; g.fillStyle = '#ffb347'; g.fillText(mode === 'jeep' ? 'AUTO AIM' : 'GUN ON', x0 + w + 12, y + 5); }   // 3.31: no AIM ring to glow
   if (VS) { g.globalAlpha = 0.85; g.font = '700 12px system-ui, sans-serif'; g.textAlign = 'center'; g.fillStyle = '#7ab8ff'; g.fillText('YOU ' + vs.me, vw / 2 - 30, y - 14); g.fillStyle = '#ff7a6a'; g.fillText(vs.foe + ' THEM', vw / 2 + 30, y - 14); }
   g.globalAlpha = 1; g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
 }
@@ -2789,7 +2799,7 @@ function drawReadout(g) {   // the old full panel + LEVELS / VERSUS / jeep switc
     g.fillStyle = '#e8ecd8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '700 12px system-ui, sans-serif'; g.fillText(t, r.x + r.w / 2, r.y + r.h / 2 + 1);
     g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
   }
-  if (sticksOn()) for (const [r, t] of [[stR, 'STICKS: ' + { both: 'BOTH', fly: 'FLY ONLY', aim: 'AIM ONLY', none: 'NONE' }[sticksShow]], [rstR, 'RESET POSITIONS']]) {   // 3.31
+  if (sticksOn()) for (const [r, t] of [[stR, 'STICKS: ' + { both: 'BOTH', fly: mode === 'jeep' ? 'DRIVE ONLY' : 'FLY ONLY', aim: 'AIM ONLY', none: 'NONE' }[sticksShow]], [rstR, 'RESET POSITIONS']]) {   // 3.31
     g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(r.x, r.y, r.w, r.h); g.strokeStyle = '#e8ecd8'; g.lineWidth = 1.5; g.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
     g.fillStyle = r === rstR && !Object.keys(pos).length ? 'rgba(232,236,216,0.45)' : '#e8ecd8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '700 12px system-ui, sans-serif'; g.fillText(t, r.x + r.w / 2, r.y + r.h / 2 + 1);
     g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
