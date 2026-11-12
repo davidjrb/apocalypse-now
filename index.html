@@ -48,7 +48,7 @@ const cv = document.getElementById('c'), cx = cv.getContext('2d');
 let vw = 0, vh = 0, dpr = 1;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.23';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.24';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -594,7 +594,7 @@ function setZoom() { Z = sticksOn() ? ZOOM_SIDE : 1; wvw = vw / Z; wvh = vh / Z;
 localStorage.removeItem('apocalypse.buttons');
 function placeButtons() {
   const S = sticksOn(), top = miniR.y + miniR.s + 14;
-  const def = S ? { gun: [vw - 58, top + 40], rkt: [vw - 58 - 88, top + 28], land: [52, 222] } : { gun: [vw - 62, vh - 70], rkt: [vw - 62 - 98, vh - 64], land: [-99, -99] };
+  const def = S ? { gun: [vw - 58, top + 40], rkt: [vw - 58 - 88, top + 28], land: [52, 150] } : { gun: [vw - 62, vh - 70], rkt: [vw - 62 - 98, vh - 64], land: [-99, -99] };
   for (const k of ['gun', 'rkt', 'land']) {
     const b = btn[k], x = def[k][0], y = def[k][1];
     b.x = Math.max(b.r + 4, Math.min(vw - b.r - 4, x)); b.y = Math.max(b.r + 120, Math.min(vh - b.r - 4, y));
@@ -738,13 +738,13 @@ cv.addEventListener('pointerdown', e => {
     const r = pickRows().find(r => r.open && e.clientX >= r.x && e.clientX <= r.x + r.w && e.clientY >= r.y && e.clientY <= r.y + r.h);
     if (r) pickLevel(r.lv); else pickOpen = false; return;
   }
-  if (mode === 'jeep' && !dead && !won && !mapBig && e.clientX >= jctlR.x && e.clientX <= jctlR.x + jctlR.w && e.clientY >= jctlR.y && e.clientY <= jctlR.y + jctlR.h) {
+  if (mode === 'jeep' && !dead && !won && mapBig && e.clientX >= jctlR.x && e.clientX <= jctlR.x + jctlR.w && e.clientY >= jctlR.y && e.clientY <= jctlR.y + jctlR.h) {
     jeepOld = !jeepOld; try { localStorage.setItem('apocalypse.jeepCtl', jeepOld ? 'old' : 'new'); } catch (e) {} say(jeepOld ? 'Old jeep controls' : 'New jeep controls'); return;
   }
-  if (!won && !mapBig && e.clientX >= lvlR.x && e.clientX <= lvlR.x + lvlR.w && e.clientY >= lvlR.y && e.clientY <= lvlR.y + lvlR.h) {
-    pickOpen = true; fingers.clear(); for (const k of Object.values(btn)) k.down = null; gunOn = gunLatch; return;
+  if (!won && mapBig && e.clientX >= lvlR.x && e.clientX <= lvlR.x + lvlR.w && e.clientY >= lvlR.y && e.clientY <= lvlR.y + lvlR.h) {
+    pickOpen = true; mapBig = false; fingers.clear(); for (const k of Object.values(btn)) k.down = null; gunOn = gunLatch; return;
   }
-  if (!won && !mapBig && !dead && e.clientX >= vsR.x && e.clientX <= vsR.x + vsR.w && e.clientY >= vsR.y && e.clientY <= vsR.y + vsR.h) { newVersus(); return; }   // 3.18
+  if (!won && mapBig && !dead && e.clientX >= vsR.x && e.clientX <= vsR.x + vsR.w && e.clientY >= vsR.y && e.clientY <= vsR.y + vsR.h) { newVersus(); return; }   // 3.18
   if (won) { if (won.t > 2) { if (VS) newVersus(); else nextLevel(); } return; }
   if (dead) { if (dead.t > 3.5) { if (lives === 0) showScores(gameOver); else restart(); } return; }
   // 2.2: tap the minimap = the whole map (the game waits); tap again to close
@@ -2420,6 +2420,64 @@ function drawSticks(g) {   // 3.20: a ring where the thumb landed + the knob; fa
     g.globalAlpha = 1;
   }
 }
+// 3.24 (the player 11-11 22:24 "alt spd score useless, just have stuff like that visible when minimap is open, taking up
+// unreasonably much real estate"): in play only small ARMOR/AMMO/RKT/FUEL bars (+ YOU:THEM in VERSUS) top left; the full
+// readout, LEVELS, VERSUS and the jeep OLD/NEW switch are on the big map (tap the minimap).
+function drawMiniHud(g) {
+  const J = mode === 'jeep' && jeep, x = 10, y = 12, bx = 50, bw = 56;
+  g.fillStyle = 'rgba(0,0,0,0.38)'; g.fillRect(x, y, 112, 54 + (VS ? 16 : 0));
+  g.font = '700 10px system-ui, sans-serif'; g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillStyle = '#e8ecd8';
+  g.fillText('ARMOR', x + 5, y + 9); g.fillText('AMMO', x + 5, y + 21); g.fillText(J ? 'CARGO' : 'RKT', x + 5, y + 33); g.fillText('FUEL', x + 5, y + 45);
+  const hp = J ? jeep.hp : heli.hp, hpN = J ? JEEP_HP : HP_MAX, sq = Math.floor(bw / hpN);
+  for (let i = 0; i < hpN; i++) { g.fillStyle = i < hp ? (hp === 1 ? '#ff5a3c' : hp === 2 ? '#ffb347' : '#8fd16a') : 'rgba(255,255,255,0.18)'; g.fillRect(x + bx + i * sq, y + 5, sq - 3, 8); }
+  const am = J ? jeep.ammo : ammo, amMax = J ? JEEP_AMMO : AMMO_MAX, amLow = J ? 80 : 200;
+  g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(x + bx, y + 17, bw, 8);
+  g.fillStyle = am === 0 ? '#ff5a3c' : am < amLow ? '#ffb347' : '#e8d24a'; g.fillRect(x + bx, y + 17, bw * Math.min(1, am / amMax), 8);
+  if (J) { g.fillStyle = jeep.cargo.fuel ? '#e04a3a' : 'rgba(255,255,255,0.18)'; g.fillRect(x + bx, y + 29, 12, 8); g.fillStyle = jeep.cargo.ammo ? '#7d9a3c' : 'rgba(255,255,255,0.18)'; g.fillRect(x + bx + 16, y + 29, 12, 8); }
+  else for (let i = 0; i < RKT_MAX; i++) { g.fillStyle = i < rkts ? '#ffd64a' : 'rgba(255,255,255,0.18)'; g.fillRect(x + bx + i * 14, y + 29, 11, 8); }
+  const fl = J ? jeep.fuel / JEEP_FUEL : fuel / FUEL_MAX;
+  g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(x + bx, y + 41, bw, 8);
+  g.fillStyle = fl < FUEL_LOW ? (T % 0.8 < 0.4 ? '#ff5a3c' : '#a83a26') : '#8fd16a'; g.fillRect(x + bx, y + 41, bw * fl, 8);
+  if (VS) { g.font = '700 12px system-ui, sans-serif'; g.fillStyle = '#7ab8ff'; g.fillText('YOU ' + vs.me, x + 5, y + 61); g.fillStyle = '#ff7a6a'; g.textAlign = 'right'; g.fillText(vs.foe + ' THEM', x + 107, y + 61); g.textAlign = 'left'; }
+  g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
+}
+function drawReadout(g) {   // the old full panel + LEVELS / VERSUS / jeep switch: big map only since 3.24
+  g.textAlign = 'left';
+  // readout
+  g.font = '600 13px system-ui, sans-serif'; g.textBaseline = 'top'; g.fillStyle = 'rgba(0,0,0,0.45)';
+  g.fillRect(10, 12, 134, 138);
+  g.fillStyle = '#e8ecd8';
+  g.fillText(mode === 'jeep' ? 'JEEP' : 'ALT ' + String(Math.round(heli.alt * 120)).padStart(3, ' ') + ' ft', 18, 17);
+  g.fillText('SPD ' + String(Math.round(Math.hypot(me().vx, me().vy) / 3)).padStart(3, ' ') + ' kt', 18, 33);
+  if (VS) { g.fillStyle = '#7ab8ff'; g.fillText('YOU ' + vs.me, 18, 129); g.fillStyle = '#ff7a6a'; g.fillText(vs.foe + ' THEM', 80, 129); }
+  else { g.fillStyle = lives <= 2 ? '#ff9a3c' : '#e8ecd8'; g.fillText('LIVES ' + lives + '   LV ' + LEVEL, 18, 129); } g.fillStyle = '#e8ecd8';
+  g.fillText('SCORE ' + score, 18, 49);
+  g.fillText('ARMOR', 18, 65);
+  // 2.4: in the jeep the panel shows the jeep's own armor, ammo and fuel, and what it carries for the chopper
+  const J = mode === 'jeep' && jeep, am = J ? jeep.ammo : ammo, amLow = J ? 80 : 200;
+  g.fillStyle = am === 0 ? '#ff5a3c' : am < amLow ? '#ffb347' : '#e8ecd8'; g.fillText('AMMO ' + am, 18, 81);
+  g.fillStyle = '#e8ecd8'; g.fillText(J ? 'CARGO' : 'RKT', 18, 97); g.fillText('FUEL', 18, 113);
+  const fl = J ? jeep.fuel / JEEP_FUEL : fuel / FUEL_MAX; g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(82, 115, 52, 11);
+  g.fillStyle = fl < FUEL_LOW ? (T % 0.8 < 0.4 ? '#ff5a3c' : '#a83a26') : '#8fd16a'; g.fillRect(82, 115, 52 * fl, 11);
+  if (J) {   // a red can, a green box: bright when loaded
+    g.fillStyle = jeep.cargo.fuel ? '#e04a3a' : 'rgba(255,255,255,0.18)'; g.fillRect(84, 98, 12, 13);
+    g.fillStyle = jeep.cargo.ammo ? '#7d9a3c' : 'rgba(255,255,255,0.18)'; g.fillRect(104, 99, 14, 11);
+    if (jeep.cargo.ammo) { g.fillStyle = '#e8d24a'; g.fillRect(108, 103, 6, 3); }
+  } else for (let i = 0; i < RKT_MAX; i++) { g.fillStyle = i < rkts ? '#ffd64a' : 'rgba(255,255,255,0.18)'; g.fillRect(82 + i * 14, 99, 10, 11); }
+  // 3.16 (the player 11-11 17:18 "Remove the bad button"): gone; the flight log still records touches.
+  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(lvlR.x, lvlR.y, lvlR.w, lvlR.h);
+  g.strokeStyle = '#e8ecd8'; g.lineWidth = 1.5; g.strokeRect(lvlR.x + 0.5, lvlR.y + 0.5, lvlR.w - 1, lvlR.h - 1);
+  g.fillStyle = '#e8ecd8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '700 13px system-ui, sans-serif';
+  g.fillText('LEVELS', lvlR.x + lvlR.w / 2, lvlR.y + lvlR.h / 2 + 1);
+  g.fillStyle = VS ? 'rgba(120,20,10,0.6)' : 'rgba(0,0,0,0.45)'; g.fillRect(vsR.x, vsR.y, vsR.w, vsR.h);   // 3.18
+  g.strokeStyle = VS ? '#ff7a6a' : '#e8ecd8'; g.strokeRect(vsR.x + 0.5, vsR.y + 0.5, vsR.w - 1, vsR.h - 1);
+  g.fillStyle = VS ? '#ffd0c8' : '#e8ecd8'; g.fillText(VS ? 'NEW MAP' : 'VERSUS', vsR.x + vsR.w / 2, vsR.y + vsR.h / 2 + 1); g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
+  if (mode === 'jeep') { g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(jctlR.x, jctlR.y, jctlR.w, jctlR.h); g.strokeStyle = '#e8ecd8'; g.strokeRect(jctlR.x + 0.5, jctlR.y + 0.5, jctlR.w - 1, jctlR.h - 1);
+    g.fillStyle = '#e8ecd8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '700 12px system-ui, sans-serif'; g.fillText(jeepOld ? 'OLD JEEP' : 'NEW JEEP', jctlR.x + jctlR.w / 2, jctlR.y + jctlR.h / 2 + 1);
+    g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif'; }
+  if (mode === 'jeep') for (let i = 0; i < JEEP_HP; i++) { g.fillStyle = i < jeep.hp ? (jeep.hp === 1 ? '#ff5a3c' : jeep.hp === 2 ? '#ffb347' : '#8fd16a') : 'rgba(255,255,255,0.18)'; g.fillRect(82 + i * 14, 67, 10, 11); }
+  else for (let i = 0; i < HP_MAX; i++) { g.fillStyle = i < heli.hp ? (heli.hp === 1 ? '#ff5a3c' : heli.hp === 2 ? '#ffb347' : '#8fd16a') : 'rgba(255,255,255,0.18)'; g.fillRect(82 + i * 14, 67, 10, 11); }
+}
 function drawVersion(g) {   // 3.23
   g.save(); g.font = '600 13px system-ui, sans-serif'; g.textAlign = 'right'; g.textBaseline = 'bottom';
   g.fillStyle = 'rgba(0,0,0,0.6)'; const t = 'Version ' + VERSION + (window.AndroidLog ? ' (app)' : ''), w = g.measureText(t).width;
@@ -2553,40 +2611,8 @@ function draw() {
   // 1.2: the map is too big to show whole, so the minimap is a MINI_W window around you
   const MINI_W = 6000, P = me(), wx = Math.max(0, Math.min(W - MINI_W, P.x - MINI_W / 2)), wy = Math.max(0, Math.min(H - MINI_W, P.y - MINI_W / 2));
   if (!mapBig) drawMap(g, mx, my, mm, wx, wy, MINI_W, false);
-  // readout
-  g.font = '600 13px system-ui, sans-serif'; g.textBaseline = 'top'; g.fillStyle = 'rgba(0,0,0,0.45)';
-  g.fillRect(10, 12, 134, 138);
-  g.fillStyle = '#e8ecd8';
-  g.fillText(mode === 'jeep' ? 'JEEP' : 'ALT ' + String(Math.round(heli.alt * 120)).padStart(3, ' ') + ' ft', 18, 17);
-  g.fillText('SPD ' + String(Math.round(Math.hypot(me().vx, me().vy) / 3)).padStart(3, ' ') + ' kt', 18, 33);
-  if (VS) { g.fillStyle = '#7ab8ff'; g.fillText('YOU ' + vs.me, 18, 129); g.fillStyle = '#ff7a6a'; g.fillText(vs.foe + ' THEM', 80, 129); }
-  else { g.fillStyle = lives <= 2 ? '#ff9a3c' : '#e8ecd8'; g.fillText('LIVES ' + lives + '   LV ' + LEVEL, 18, 129); } g.fillStyle = '#e8ecd8';
-  g.fillText('SCORE ' + score, 18, 49);
-  g.fillText('ARMOR', 18, 65);
-  // 2.4: in the jeep the panel shows the jeep's own armor, ammo and fuel, and what it carries for the chopper
-  const J = mode === 'jeep' && jeep, am = J ? jeep.ammo : ammo, amLow = J ? 80 : 200;
-  g.fillStyle = am === 0 ? '#ff5a3c' : am < amLow ? '#ffb347' : '#e8ecd8'; g.fillText('AMMO ' + am, 18, 81);
-  g.fillStyle = '#e8ecd8'; g.fillText(J ? 'CARGO' : 'RKT', 18, 97); g.fillText('FUEL', 18, 113);
-  const fl = J ? jeep.fuel / JEEP_FUEL : fuel / FUEL_MAX; g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(82, 115, 52, 11);
-  g.fillStyle = fl < FUEL_LOW ? (T % 0.8 < 0.4 ? '#ff5a3c' : '#a83a26') : '#8fd16a'; g.fillRect(82, 115, 52 * fl, 11);
-  if (J) {   // a red can, a green box: bright when loaded
-    g.fillStyle = jeep.cargo.fuel ? '#e04a3a' : 'rgba(255,255,255,0.18)'; g.fillRect(84, 98, 12, 13);
-    g.fillStyle = jeep.cargo.ammo ? '#7d9a3c' : 'rgba(255,255,255,0.18)'; g.fillRect(104, 99, 14, 11);
-    if (jeep.cargo.ammo) { g.fillStyle = '#e8d24a'; g.fillRect(108, 103, 6, 3); }
-  } else for (let i = 0; i < RKT_MAX; i++) { g.fillStyle = i < rkts ? '#ffd64a' : 'rgba(255,255,255,0.18)'; g.fillRect(82 + i * 14, 99, 10, 11); }
-  // 3.16 (the player 11-11 17:18 "Remove the bad button"): gone; the flight log still records touches.
-  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(lvlR.x, lvlR.y, lvlR.w, lvlR.h);
-  g.strokeStyle = '#e8ecd8'; g.lineWidth = 1.5; g.strokeRect(lvlR.x + 0.5, lvlR.y + 0.5, lvlR.w - 1, lvlR.h - 1);
-  g.fillStyle = '#e8ecd8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '700 13px system-ui, sans-serif';
-  g.fillText('LEVELS', lvlR.x + lvlR.w / 2, lvlR.y + lvlR.h / 2 + 1);
-  g.fillStyle = VS ? 'rgba(120,20,10,0.6)' : 'rgba(0,0,0,0.45)'; g.fillRect(vsR.x, vsR.y, vsR.w, vsR.h);   // 3.18
-  g.strokeStyle = VS ? '#ff7a6a' : '#e8ecd8'; g.strokeRect(vsR.x + 0.5, vsR.y + 0.5, vsR.w - 1, vsR.h - 1);
-  g.fillStyle = VS ? '#ffd0c8' : '#e8ecd8'; g.fillText(VS ? 'NEW MAP' : 'VERSUS', vsR.x + vsR.w / 2, vsR.y + vsR.h / 2 + 1); g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
-  if (mode === 'jeep') { g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(jctlR.x, jctlR.y, jctlR.w, jctlR.h); g.strokeStyle = '#e8ecd8'; g.strokeRect(jctlR.x + 0.5, jctlR.y + 0.5, jctlR.w - 1, jctlR.h - 1);
-    g.fillStyle = '#e8ecd8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '700 12px system-ui, sans-serif'; g.fillText(jeepOld ? 'OLD JEEP' : 'NEW JEEP', jctlR.x + jctlR.w / 2, jctlR.y + jctlR.h / 2 + 1);
-    g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif'; }
-  if (mode === 'jeep') for (let i = 0; i < JEEP_HP; i++) { g.fillStyle = i < jeep.hp ? (jeep.hp === 1 ? '#ff5a3c' : jeep.hp === 2 ? '#ffb347' : '#8fd16a') : 'rgba(255,255,255,0.18)'; g.fillRect(82 + i * 14, 67, 10, 11); }
-  else for (let i = 0; i < HP_MAX; i++) { g.fillStyle = i < heli.hp ? (heli.hp === 1 ? '#ff5a3c' : heli.hp === 2 ? '#ffb347' : '#8fd16a') : 'rgba(255,255,255,0.18)'; g.fillRect(82 + i * 14, 67, 10, 11); }
+  if (!mapBig) { g.font = '700 10px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'top'; g.fillStyle = 'rgba(232,236,216,0.8)'; g.fillText('TAP: MAP + MENU', mx + mm / 2, my + mm + 2); g.textAlign = 'left'; }   // 3.24
+  if (!mapBig) drawMiniHud(g);   // 3.24
   // buttons (helicopter only)
   placeButtons();
   for (const b of Object.values(btn)) {
@@ -2606,7 +2632,7 @@ function draw() {
   if (msgT > 0) {
     g.globalAlpha = Math.min(1, msgT * 2); g.font = '600 16px system-ui, sans-serif';
     // 3.18: under the LEVELS/VERSUS row (it covered them), wrapped to the screen
-    const ls = wrapLines(g, msg, vw - 48), w = Math.max(...ls.map(l => g.measureText(l).width)) + 28, y0 = 234;
+    const side = vw > vh, ls = wrapLines(g, msg, side ? vw - 2 * (miniR.s + 30) : vw - 48), w = Math.max(...ls.map(l => g.measureText(l).width)) + 28, y0 = side ? (VS ? 90 : 74) : miniR.y + miniR.s + 24;   // 3.24: clear of the HUD and minimap
     g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(vw / 2 - w / 2, y0, w, 10 + ls.length * 21);
     g.fillStyle = '#fff'; ls.forEach((l, i) => g.fillText(l, vw / 2, y0 + 7 + i * 21)); g.globalAlpha = 1;
   }
@@ -2614,7 +2640,7 @@ function draw() {
     const S = Math.min(vw, vh) - 24;
     g.fillStyle = 'rgba(0,0,0,0.65)'; g.fillRect(0, 0, vw, vh);
     drawMap(g, (vw - S) / 2, (vh - S) / 2, S, 0, 0, W, true);
-    drawVersion(g);
+    drawReadout(g); drawVersion(g);
   }
   if (dead) drawTaunt(g);
   if (won) drawWin(g);
