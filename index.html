@@ -55,7 +55,7 @@ let QUAL = window.AndroidLog || / wv\)/.test(navigator.userAgent) ? 3 : 1.75; co
 let fpsAcc = 0, fpsN = 0, fpsShow = 0, fpsT0 = 0;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.37';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.38';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -573,7 +573,10 @@ const GUN_TAP = 250;   // ms: a press shorter than this is a tap
 let gunLatch = false;
 let gunOn = false, dead = null, shake = 0, lastScore = 0;
 let msg = '', msgT = 0, flown = false, turned = false, score = 0;
-function say(t, s = 1.6) { msg = t; msgT = s; }
+// 3.38 (the player 11-15 17:59 "Stop with the text hints"): only lines he can't see any other way still show (level name,
+// lives left, flags and VERSUS score, enemy chopper down, freak out, pause/new game). HINTS = true brings the rest back.
+const HINTS = false, SAY_KEEP = /^(Level \d|VERSUS|FREAK|Game paused|Starting a new game|Enemy chopper down|The bases shot|They have your flag|They took|You have|Your flag|You dropped|They dropped|POINT|They scored|YOU \d|\d+ li)/;
+function say(t, s = 1.6) { if (!HINTS && !SAY_KEEP.test(t)) return; msg = t; msgT = s; }
 const ang = a => Math.atan2(Math.sin(a), Math.cos(a));
 
 // ---------- 2.7 flight recorder (the player 11-06 21:52: log direction, speed etc against my touches) ----------
@@ -656,6 +659,12 @@ const stR = { x: 10, y: 234, w: 154, h: 30 }, rstR = { x: 10, y: 272, w: 154, h:
 // start over. EXIT: inside AN Launcher (1.3+, window.AN) it closes the game; a browser can't close its own tab, so there
 // it leaves full screen and stays paused on this map with a note.
 const ngR = { x: 0, y: 0, w: 88, h: 30 }, exR = { x: 0, y: 0, w: 62, h: 30 };
+// 3.38 (the player 11-15 18:04 "I use the minimap to unpause. I need a more deliberate way to resume. Starting a new game
+// should have a confirmation prompt"): the big map closes only with RESUME (bottom middle) or Start on a controller; a tap
+// anywhere else does nothing. NEW GAME and EXIT ask first: the button turns into SURE? for 3 s, a second tap does it.
+const resR = { x: 0, y: 0, w: 170, h: 50 }, SURE_S = 3000; let sureK = null, sureT = 0;
+const sure = k => { const now = performance.now(); if (sureK === k && now - sureT < SURE_S) { sureK = null; return true; } sureK = k; sureT = now; return false; };
+const sureOn = k => sureK === k && performance.now() - sureT < SURE_S;
 const newerV = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
 let ngBusy = false;
 async function newGame() {
@@ -900,8 +909,9 @@ cv.addEventListener('pointerdown', e => {
     pickOpen = true; mapBig = false; fingers.clear(); for (const k of Object.values(btn)) k.down = null; gunOn = gunLatch; return;
   }
   const inR = r => e.clientX >= r.x && e.clientX <= r.x + r.w && e.clientY >= r.y && e.clientY <= r.y + r.h;   // 3.31
-  if (!won && mapBig && inR(ngR)) { newGame(); return; }   // 3.33
-  if (!won && mapBig && inR(exR)) { exitGame(); return; }
+  if (!won && mapBig && inR(resR)) { mapBig = false; sureK = null; return; }   // 3.38: the one way back in
+  if (!won && mapBig && inR(ngR)) { if (sure('ng')) newGame(); return; }   // 3.33, 3.38: asks first
+  if (!won && mapBig && inR(exR)) { if (sure('ex')) exitGame(); return; }
   if (!won && mapBig && sticksOn() && inR(stR)) { sticksShow = STICK_SHOWS[(STICK_SHOWS.indexOf(sticksShow) + 1) % 4]; try { localStorage.setItem('apocalypse.sticks', sticksShow); } catch (e) {} return; }
   if (!won && mapBig && sticksOn() && inR(rstR)) { pos = {}; savePos(); say('ROCKET, map and sticks back where they started', 1.5); return; }
   if (!won && mapBig && !dead && e.clientX >= vsR.x && e.clientX <= vsR.x + vsR.w && e.clientY >= vsR.y && e.clientY <= vsR.y + vsR.h) { newVersus(); return; }   // 3.18
@@ -912,7 +922,7 @@ cv.addEventListener('pointerdown', e => {
     const k = ['tsL', 'tsR'].find(k => Math.hypot(e.clientX - centreOf(k)[0], e.clientY - centreOf(k)[1]) < TS_R + 6);
     if (k) { mv = { k, id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now(), lifted: false, cancel: false, home: centreOf(k) }; return; }
   }
-  if (mapBig) { mapBig = false; return; }
+  if (mapBig) return;   // 3.38: taps elsewhere on the big map do nothing (RESUME closes it)
   if (e.clientX > miniR.x - 8 && e.clientX < miniR.x + miniR.s + 8 && e.clientY > miniR.y - 8 && e.clientY < miniR.y + miniR.s + 8) {
     if (sticksOn()) { if (!mv) mv = { k: 'mini', id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now(), lifted: false, cancel: false, home: centreOf('mini') }; return; }   // 3.31: tap opens on let go, hold moves
     mapBig = true; fingers.clear(); for (const k of Object.values(btn)) k.down = null; gunOn = gunLatch; return;
@@ -987,7 +997,6 @@ function up(e) {
     const m = mv; mv = null;
     if (m.lifted) { savePos(); say(m.k === 'rkt' ? 'ROCKET stays here' : m.k === 'mini' ? 'Map stays here' : 'Stick stays here', 1.2); }
     else if (m.k === 'mini' && !m.cancel && !dead && !won) { mapBig = true; fingers.clear(); for (const k of Object.values(btn)) k.down = null; gunOn = gunLatch; }
-    else if ((m.k === 'tsL' || m.k === 'tsR') && mapBig) mapBig = false;   // 3.33: a tap on a ring closes the map like anywhere else
     if (m.k !== 'rkt') return;
   }
   // 1.9 (the player 18:15): GUN held = fires while held; a quick tap switches it on (stays on), another tap switches it off
@@ -1422,7 +1431,7 @@ function drawPick(g) {
   for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { g.beginPath(); g.moveTo(x + sx * k, y + sy * (k - 12)); g.lineTo(x + sx * k, y + sy * k); g.lineTo(x + sx * (k - 12), y + sy * k); g.stroke(); }
   if (pick !== 'heli' || o !== heli) {
     g.fillStyle = '#ffd64a'; g.font = '800 13px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom';
-    g.fillText(pick === 'heli' ? 'CHOPPER: DOUBLE-TAP FLY' : 'DOUBLE-TAP FLY', x, y - k - 4); g.textAlign = 'left'; g.textBaseline = 'top';
+    if (HINTS) g.fillText(pick === 'heli' ? 'CHOPPER: DOUBLE-TAP FLY' : 'DOUBLE-TAP FLY', x, y - k - 4); g.textAlign = 'left'; g.textBaseline = 'top';
   }
 }
 function leaveJeep(noHandover) {
@@ -1867,7 +1876,7 @@ function restart() {
   mode = 'heli'; jeep = null; pilot.jeepT = null; skids.length = 0; stealAsk = false;
   lastScore = score; dead = null; shells.length = 0; ammo = AMMO_MAX; rkts = RKT_MAX; fuel = FUEL_MAX; prevAlt = 0; pilot.out = false;
   Object.assign(heli, { x: PAD.x, y: PAD.y, vx: 0, vy: 0, hd: 0, alt: 0, want: 0, spin: 0, px: 0, py: 0, pushT: 0, pitch: 0, roll: 0, hp: HP_MAX, hurt: 0, sink: 0 });
-  cam.x = heli.x; cam.y = heli.y; say(VS ? 'YOU ' + vs.me + ' : ' + vs.foe + ' THEM. Tap to take off' : lives + (lives === 1 ? ' life' : ' lives') + ' left. Tap to take off', 3);
+  cam.x = heli.x; cam.y = heli.y; say(VS ? 'YOU ' + vs.me + ' : ' + vs.foe + ' THEM' : lives + (lives === 1 ? ' life' : ' lives') + ' left', 3);
 }
 // ---------- 3.18 VERSUS ----------
 // Each side: a pad, a flag on it, a chopper. A chopper is one state object moved by chopperMove; yours gets its input
@@ -2511,7 +2520,7 @@ function drawBalloon(g, t, shadow) {
 // slowed; landing on a monkey squishes it (red mark); both can be shot; killing innocent life costs INNOCENT points.
 // Monkeys sit on some canopy trees near the camera and now and then leap to a neighbouring tree; flamingos fly over
 // in V flocks at about the helicopter's height.
-const flocks = [];
+const flocks = []; let flockWait = 0;
 const INNOCENT = 0, deadMonkeys = new Set();
 function birdPos(f, k) {
   if (f.kind === 'vulture') { const a = T * 0.7 + k * 6.283 / f.n, r = 70 + (k % 2) * 30; return [f.x + Math.cos(a) * r, f.y + Math.sin(a) * r]; }   // 3.37: circling
@@ -2585,9 +2594,12 @@ function stepFauna(dt) {
   if (TH.lucy) freakOut();
   for (const f of flocks) { f.x += f.vx * dt; f.y += f.vy * dt; }
   for (let i = flocks.length - 1; i >= 0; i--) if (Math.hypot(flocks[i].x - cam.x, flocks[i].y - cam.y) > 1500) flocks.splice(i, 1);
-  while (flocks.length < (TH.lucy ? 2 : 1)) {   // 3.37: one flock at a time (Lucy keeps two goblin swarms)
+  // 3.38: a quiet spell of 25-50 s before each flock (Lucy keeps two goblin swarms all the time)
+  let spawn = TH.lucy ? 2 - flocks.length : 0;
+  if (!TH.lucy && !flocks.length) { if (flockWait <= 0) flockWait = 25 + Math.random() * 25; else if ((flockWait -= dt) <= 0) { flockWait = 0; spawn = 1; } }
+  for (; spawn > 0; spawn--) {
     const a = Math.random() * 6.28, from = 900 + Math.random() * 300, dir = a + Math.PI + (Math.random() - 0.5) * 0.8, v = 90 + Math.random() * 50;
-    flocks.push({ x: cam.x + Math.cos(a) * from, y: cam.y + Math.sin(a) * from, vx: Math.cos(dir) * v, vy: Math.sin(dir) * v, n: TH.lucy ? 5 + (Math.random() * 5 | 0) : 3 + (Math.random() * 3 | 0), ph: Math.random() * 6, dead: new Set(), kind: TH.lucy ? 'goblin' : TH.fly || 'flamingo' });
+    flocks.push({ x: cam.x + Math.cos(a) * from, y: cam.y + Math.sin(a) * from, vx: Math.cos(dir) * v, vy: Math.sin(dir) * v, n: TH.lucy ? 5 + (Math.random() * 5 | 0) : 2 + (Math.random() * 2 | 0), ph: Math.random() * 6, dead: new Set(), kind: TH.lucy ? 'goblin' : TH.fly || 'flamingo' });
     if (flocks.at(-1).kind === 'vulture') { const fl = flocks.at(-1); fl.vx *= 0.4; fl.vy *= 0.4; }
   }
 }
@@ -2628,7 +2640,7 @@ const GRAZERS = { cow: { name: 'cow', pl: 'cows', mist: ['170,20,30', '255,255,2
   caribou: { name: 'caribou', pl: 'caribou', mist: ['170,20,30', '120,90,60'] }, goat: { name: 'mountain goat', pl: 'mountain goats', mist: ['170,20,30', '235,232,225'] } };
 const deadGrazers = new Set();
 function grazerAt(i, j, k) {
-  const h = hash(i, j, 500) >>> 0; if (h % 4 || k >= 1 + (h >> 4) % 3) return null;   // a herd of 1-3 on one tile in four
+  const h = hash(i, j, 500) >>> 0; if (h % 12 || k >= 1 + (h >> 4) % 2) return null;   // 3.38: 1-2 animals on one tile in twelve (3.37: 1-3 in four)
   const id = 'g' + (i * 65536 + j) + ':' + k; if (deadGrazers.has(id)) return null;
   const r = rng(h), cx = i * TILE + 80 + r() * (TILE - 160), cy = j * TILE + 80 + r() * (TILE - 160);
   const r2 = rng(hash(i, j, 510 + k) >>> 0), x0 = cx + (r2() - 0.5) * 70, y0 = cy + (r2() - 0.5) * 70, dir = r2() * 6.28, len = 20 + r2() * 30, ph = r2() * 20;
@@ -2770,7 +2782,7 @@ function drawMonkey(g, x, y, a, swing) {
   g.restore();
 }
 function monkeyAt(ts, i, j, k) {
-  if (TH.tree !== 'jungle' || (hash(i, j, k) >>> 0) % 18) return null;   // 3.37: one jungle tree in eighteen (was nine)
+  if (TH.tree !== 'jungle' || (hash(i, j, k) >>> 0) % 480) return null;   // 3.38: one jungle tree in 480, about one monkey every other screen (3.37: 18, before: 9)
   const id = i * 65536 + j + ':' + k; if (deadMonkeys.has(id)) return null;
   const A = ts[k], B = ts[(k + 1) % ts.length], d = Math.hypot(B[0] - A[0], B[1] - A[1]);
   const per = 7, ph = ((hash(j, i, k) >>> 0) % 700) / 100, t = (T + ph) % per;
@@ -2804,7 +2816,7 @@ function drawStickRests(g) {   // 3.33: on the big map, where FLY and AIM rest (
     g.beginPath(); g.arc(x, y, TS_R, 0, 7); g.fill(); g.stroke();
     g.fillStyle = 'rgba(255,255,255,0.8)'; g.beginPath(); g.arc(x, y, 22, 0, 7); g.fill();
     g.fillStyle = '#000'; g.font = '700 11px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(lab, x, y);
-    g.fillStyle = 'rgba(232,236,216,0.85)'; g.font = '600 10px system-ui, sans-serif'; g.fillText('HOLD TO MOVE', x, y - TS_R - 9);
+    if (HINTS) { g.fillStyle = 'rgba(232,236,216,0.85)'; g.font = '600 10px system-ui, sans-serif'; g.fillText('HOLD TO MOVE', x, y - TS_R - 9); }
     g.globalAlpha = 1;
   }
   if (mv && !mv.cancel && (mv.k === 'tsL' || mv.k === 'tsR')) {
@@ -2903,8 +2915,12 @@ function drawReadout(g) {   // the old full panel + LEVELS / VERSUS / jeep switc
   g.fillStyle = VS ? '#ffd0c8' : '#e8ecd8'; g.fillText(VS ? 'NEW MAP' : 'VERSUS', vsR.x + vsR.w / 2, vsR.y + vsR.h / 2 + 1); g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
   stR.x = rstR.x = vw - stR.w - 10; stR.y = 12; rstR.y = 50;   // 3.33: top right, clear of the FLY ring
   ngR.x = vw - 164; exR.x = vw - 72; ngR.y = exR.y = sticksOn() ? 88 : 12;   // 3.33: NEW GAME + EXIT
-  for (const [r, t] of [[ngR, 'NEW GAME'], [exR, 'EXIT']]) {
-    g.fillStyle = r === exR ? 'rgba(120,20,10,0.55)' : 'rgba(0,0,0,0.45)'; g.fillRect(r.x, r.y, r.w, r.h); g.strokeStyle = r === exR ? '#ff9a8a' : '#e8ecd8'; g.lineWidth = 1.5; g.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+  resR.x = vw / 2 - resR.w / 2; resR.y = vh > vw ? (vh + Math.min(vw, vh) - 24) / 2 + 24 : vh - resR.h - 40;   // 3.38: RESUME (upright: just under the map)
+  g.fillStyle = 'rgba(40,110,40,0.85)'; g.fillRect(resR.x, resR.y, resR.w, resR.h); g.strokeStyle = '#c8f0b0'; g.lineWidth = 2.5; g.strokeRect(resR.x + 1, resR.y + 1, resR.w - 2, resR.h - 2);
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '800 20px system-ui, sans-serif'; g.fillText('RESUME', resR.x + resR.w / 2, resR.y + resR.h / 2 + 1);
+  g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
+  for (const [r, t] of [[ngR, sureOn('ng') ? 'SURE?' : 'NEW GAME'], [exR, sureOn('ex') ? 'SURE?' : 'EXIT']]) {
+    g.fillStyle = sureOn(r === ngR ? 'ng' : 'ex') ? 'rgba(200,120,0,0.9)' : r === exR ? 'rgba(120,20,10,0.55)' : 'rgba(0,0,0,0.45)'; g.fillRect(r.x, r.y, r.w, r.h); g.strokeStyle = r === exR ? '#ff9a8a' : '#e8ecd8'; g.lineWidth = 1.5; g.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
     g.fillStyle = '#e8ecd8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '700 12px system-ui, sans-serif'; g.fillText(t, r.x + r.w / 2, r.y + r.h / 2 + 1);
     g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
   }
@@ -3232,7 +3248,7 @@ rec({ e: 'start', v: VERSION, versus: VS ? VS.seed : 0, TURN, FAST_K, FACE_DEAD,
 if (new URLSearchParams(location.search).has('scores')) { history.replaceState(null, '', location.pathname); setTimeout(() => showScores(() => {}), 300); }   // 3.27: widget SCORES button
 if (VS) { foeSpawn(); say('VERSUS on ' + TH.name + ': bring their red flag to your pad. First to ' + VS_WIN, 5); }
 else say('Level ' + LEVEL + ': ' + TH.name + (LEVEL > THEMES.length ? ' (harder)' : ''), 3.5);
-window.rw = { FLYERS, GRAZERS, grazersNear, deadGrazers, killGrazer, get pick() { return pick; }, set pick(v) { pick = v; }, pickToward, goPick, pickActive, pickCands, ngR, exR, newerV, newGame, exitGame, runners, bailJeep, swapJeep, bailAt, get pos() { return pos; }, centreOf, get sticksHidden() { return sticksShow === 'none'; }, get sticksShow() { return sticksShow; }, stR, rstR, HOLD_MOVE, get dpr() { return dpr; }, get fps() { return fpsShow; }, RKT_ZONE, aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
+window.rw = { resR, get sureK() { return sureK; }, get flockWait() { return flockWait; }, set flockWait(v) { flockWait = v; }, spawnFlock: () => { flockWait = 0.0001; }, FLYERS, GRAZERS, grazersNear, deadGrazers, killGrazer, get pick() { return pick; }, set pick(v) { pick = v; }, pickToward, goPick, pickActive, pickCands, ngR, exR, newerV, newGame, exitGame, runners, bailJeep, swapJeep, bailAt, get pos() { return pos; }, centreOf, get sticksHidden() { return sticksShow === 'none'; }, get sticksShow() { return sticksShow; }, stR, rstR, HOLD_MOVE, get dpr() { return dpr; }, get fps() { return fpsShow; }, RKT_ZONE, aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
 window.rwSet = o => { Object.assign(heli, o); if (o.x !== undefined) { cam.x = heli.x; cam.y = heli.y; } flown = turned = !!o.flown; };
 const q = new URLSearchParams(location.search);
 if (q.has('shot')) rwSet({ x: +q.get('x') || PAD.x, y: +q.get('y') || PAD.y, alt: +q.get('alt') || 0, spin: +(q.get('spin') || 0), want: q.get('alt') > 0 ? 1 : 0, hd: +(q.get('hd') || 0), vx: +(q.get('vx') || 0), vy: +(q.get('vy') || 0), flown: q.has('flown') });
