@@ -55,7 +55,7 @@ let QUAL = window.AndroidLog || / wv\)/.test(navigator.userAgent) ? 3 : 1.75; co
 let fpsAcc = 0, fpsN = 0, fpsShow = 0, fpsT0 = 0;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.38';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.39';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -2915,9 +2915,12 @@ function drawReadout(g) {   // the old full panel + LEVELS / VERSUS / jeep switc
   g.fillStyle = VS ? '#ffd0c8' : '#e8ecd8'; g.fillText(VS ? 'NEW MAP' : 'VERSUS', vsR.x + vsR.w / 2, vsR.y + vsR.h / 2 + 1); g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
   stR.x = rstR.x = vw - stR.w - 10; stR.y = 12; rstR.y = 50;   // 3.33: top right, clear of the FLY ring
   ngR.x = vw - 164; exR.x = vw - 72; ngR.y = exR.y = sticksOn() ? 88 : 12;   // 3.33: NEW GAME + EXIT
-  resR.x = vw / 2 - resR.w / 2; resR.y = vh > vw ? (vh + Math.min(vw, vh) - 24) / 2 + 24 : vh - resR.h - 40;   // 3.38: RESUME (upright: just under the map)
+  // 3.38 RESUME; 3.39 (the player 11-15 18:17 "Resume button should not obstruct minimap view"): upright just under the map,
+  // sideways in the left margin under LEVELS / VERSUS, never on the map square.
+  if (vh > vw) { resR.w = 170; resR.h = 50; resR.x = vw / 2 - resR.w / 2; resR.y = (vh + vw - 24) / 2 + 24; }
+  else { resR.w = Math.max(90, Math.min(154, (vw - (vh - 24)) / 2 - 20)); resR.h = 38; resR.x = 10; resR.y = lvlR.y + lvlR.h + 6; }
   g.fillStyle = 'rgba(40,110,40,0.85)'; g.fillRect(resR.x, resR.y, resR.w, resR.h); g.strokeStyle = '#c8f0b0'; g.lineWidth = 2.5; g.strokeRect(resR.x + 1, resR.y + 1, resR.w - 2, resR.h - 2);
-  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '800 20px system-ui, sans-serif'; g.fillText('RESUME', resR.x + resR.w / 2, resR.y + resR.h / 2 + 1);
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '800 ' + (resR.w < 140 ? 16 : 20) + 'px system-ui, sans-serif'; g.fillText('RESUME', resR.x + resR.w / 2, resR.y + resR.h / 2 + 1);
   g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
   for (const [r, t] of [[ngR, sureOn('ng') ? 'SURE?' : 'NEW GAME'], [exR, sureOn('ex') ? 'SURE?' : 'EXIT']]) {
     g.fillStyle = sureOn(r === ngR ? 'ng' : 'ex') ? 'rgba(200,120,0,0.9)' : r === exR ? 'rgba(120,20,10,0.55)' : 'rgba(0,0,0,0.45)'; g.fillRect(r.x, r.y, r.w, r.h); g.strokeStyle = r === exR ? '#ff9a8a' : '#e8ecd8'; g.lineWidth = 1.5; g.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
