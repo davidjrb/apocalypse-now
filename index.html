@@ -62,7 +62,7 @@ let QUAL = window.AndroidLog || / wv\)/.test(navigator.userAgent) ? 3 : 1.75; co
 let fpsAcc = 0, fpsN = 0, fpsShow = 0, fpsT0 = 0;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.42';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.43';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -627,7 +627,7 @@ const HELP = [
   ['Fly', ['Sideways: push the FLY stick (left) the way you want to go.', 'Upright: drag your finger on the screen.', 'Let go and it keeps drifting, then slows down.', 'Push FLY when landed to take off.']],
   ['Shoot', ['AIM stick (right): hold and push = turn and shoot that way.', 'Double-tap AIM = gun stays on. Double-tap again = off.', 'ROCKET button: homing rocket at what is in front.', 'Upright: GUN and ROCKET buttons.']],
   ['Land', ['Double-tap FLY (or the LAND button) = land or take off.', 'Land on your H pad: fuel, ammo and repair.', 'Land on an enemy H: your pilot runs to their fuel and ammo.', 'Do not land on water, trees or houses.']],
-  ['Jeeps and tanks', ['Shoot one to half armor: the crew runs away. It is empty now.', 'Hold your finger on it to take it. Or, landed: point AIM at it, double-tap FLY.', 'DRIVE stick drives. AIM turns the gun or turret.', 'Hold AIM = shoot. Double-tap AIM = auto aim.', 'Drive back to the chopper to fly again.', 'Fuel and ammo you pick up go to the chopper too.']],
+  ['Jeeps and tanks', ['Shoot one until it is almost dead: the crew runs away. Now it is empty.', 'To take it: land right next to it, then hold your finger on it.', 'You get it with half armor.', 'From a jeep or tank: stop next to an empty one and hold on it.', 'DRIVE stick drives. AIM turns the gun or turret.', 'Hold AIM = shoot. Double-tap AIM = auto aim.', 'Drive back to the chopper to fly again.', 'Fuel and ammo you pick up go to the chopper too.']],
   ['Flag', ['Find the enemy flag, pick it up, bring it to your H pad.', 'That wins the level. VERSUS: race the other chopper.']],
   ['Map', ['Tap the small map to open this big map. The game pauses.', 'RESUME = back to the game. ZOOM - / + = see more or less.', 'STICKS: show or hide the sticks.', 'Move a stick: on this map, hold it, then drag it.', 'Move ROCKET or the small map: hold it in the game, then drag it.', 'RESET POSITIONS puts them all back. LEVELS: pick a level.', 'NEW GAME and EXIT ask SURE? first.']],
 ];
@@ -775,14 +775,23 @@ const JEEP_PRESS = 55, JEEP_HOLD = 500;
 // differ: TANK_V top speed (jeep 280), turns on the spot at TANK_W rad/s, turret TANK_TUR rad/s (jeep 8), TANK_HP armor,
 // a cannon: TANK_AMMO shells, one every TGUN_COOL s, TGUN_DMG a hit (enemy tank 8, jeep 3), TGUN_R reach. Lucy: only a
 // folded-down robot can be taken. The player's tank is olive like the player's jeep.
-const TANK_V = 120, TANK_W = 1.5, TANK_TUR = 2.5, TANK_HP = 8, TANK_AMMO = 30, TGUN_COOL = 0.9, TGUN_DMG = 4, TGUN_V = 520, TGUN_R = 460;
+const TANK_V = 120, TANK_W = 1.5, TANK_TUR = 2.5, TANK_HP = 12, TANK_AMMO = 30, TGUN_COOL = 0.9, TGUN_DMG = 4, TGUN_V = 520, TGUN_R = 460;
 const CAR = t => t.kind === 'jeep' || t.kind === 'tank' && !(t.fold > 0.05);
 const carHP = j => j.tank ? TANK_HP : JEEP_HP, carAmmo = j => j.tank ? TANK_AMMO : JEEP_AMMO;
 let stealAsk = false;
-function jeepUnder(x, y) {   // 3.32: from a jeep, empty (parked) ones only
+// 3.43 (the player 11-15 19:41 "switching vehicles should be done under very specific circumstances. Anything else is
+// confusing. ... Everything else seems to always want you to hijack something"): ONE way to change vehicle: you are
+// stopped (chopper landed, or your jeep/tank standing still), an EMPTY vehicle (its crew ran off) is within STEAL_R, and you
+// hold a finger on it JEEP_HOLD ms (either thumb; controller Y, key F). No taking crewed vehicles, nothing from the air or
+// on the move, and AIM never selects anything (3.34 picking is off: pickActive() is false). Out of fuel on the ground the
+// pilot still runs up to STEAL_FAR for an empty one. Driving up to the chopper still gets you back in, as before.
+function jeepUnder(x, y) {   // 3.32: from a jeep, empty (parked) ones only; 3.43: same from the chopper, and only when stopped next to it
   if ((mode !== 'heli' && mode !== 'jeep') || dead || pilot.out) return null;
+  const o = mode === 'jeep' ? jeep : heli;
+  if (!o || Math.hypot(o.vx, o.vy) > 30 || (mode === 'heli' && (heli.alt > 0 || heli.want))) return null;
+  const reach = mode === 'heli' && fuel === 0 ? STEAL_FAR : STEAL_R;
   const wx = cam.x - wvw / 2 + x / Z, wy = cam.y - wvh / 2 + y / Z; let best = null, bd = JEEP_PRESS;
-  for (const t of targets) if (CAR(t) && !t.dead && !t.stolen && (mode === 'heli' || t.parked)) { const d = Math.hypot(t.x - wx, t.y - wy); if (d < bd) { bd = d; best = t; } }
+  for (const t of targets) if (CAR(t) && !t.dead && !t.stolen && t.parked && Math.hypot(t.x - o.x, t.y - o.y) < reach) { const d = Math.hypot(t.x - wx, t.y - wy); if (d < bd) { bd = d; best = t; } }
   return best;
 }
 // 3.32 (the player 11-12 00:42 "After you shoot half of the jeep's armor its driver runs out of it, leaving it for the taking.
@@ -794,7 +803,9 @@ function jeepUnder(x, y) {   // 3.32: from a jeep, empty (parked) ones only
 // own armor, fuel, ammo and cargo. The chopper can still take any live jeep, as before.
 const BAIL_SAFE = 1.5, RUNNER_V = 70, RUNNER_LIFE = 7;
 const runners = [];
-const bailAt = t => Math.ceil(t.max / 2);
+// 3.43 (the player 11-15 19:41 "Tanks and jeeps should be abandoned when they're on their very last leg"): the crew bails at
+// BAIL_K of full armor (at least 1): jeep at 1 of 3, tank at 2 of 14. You get it with half its armor (jeep 2/4, tank 6/12).
+const BAIL_K = 0.15, bailAt = t => Math.max(1, t.max * BAIL_K);
 function bailJeep(t) {
   t.parked = true; t.bailed = true; t.safeT = BAIL_SAFE; t.vx = t.vy = 0;
   const P = me();
@@ -827,7 +838,7 @@ function drawRunner(g, r) {
 }
 function parkCar(o) {   // 3.41: the vehicle you leave, as an empty target that keeps its own stock
   const tk = !!o.tank;
-  return { kind: tk ? 'tank' : 'jeep', x: o.x, y: o.y, hd: o.hd, tur: o.aim === undefined ? o.hd : o.aim, hp: tk ? 8 : 3, max: tk ? 8 : 3, r: tk ? 18 : 14, vx: 0, vy: 0, t: 0, hit: 0, dead: 0, cool: 999, parked: true,
+  return { kind: tk ? 'tank' : 'jeep', x: o.x, y: o.y, hd: o.hd, tur: o.aim === undefined ? o.hd : o.aim, hp: tk ? 14 : 3, max: tk ? 14 : 3, r: tk ? 18 : 14, vx: 0, vy: 0, t: 0, hit: 0, dead: 0, cool: 999, parked: true,
     js: { hp: o.hp, fuel: o.fuel, ammo: o.ammo, cargo: { ...o.cargo } } };
 }
 function swapJeep(t) {   // 3.32: from your jeep into another; yours stays parked with its own stock
@@ -839,19 +850,19 @@ function swapJeep(t) {   // 3.32: from your jeep into another; yours stays parke
 }
 function holdJeep(t) {
   if (mode === 'jeep') {   // 3.32
-    if (!jeep || Math.hypot(t.x - jeep.x, t.y - jeep.y) > STEAL_R || Math.abs(jeep.v || Math.hypot(jeep.vx, jeep.vy)) > 60) { say('Stop next to the empty jeep, then hold on it'); return; }
+    if (!jeep || Math.hypot(t.x - jeep.x, t.y - jeep.y) > STEAL_R || Math.hypot(jeep.vx, jeep.vy) > 30) { say('Stop next to the empty jeep, then hold on it'); return; }
     if (!t.parked) { say('Someone is driving that one: shoot it first'); return; }
     swapJeep(t); return;
   }
   const reach = fuel === 0 ? STEAL_FAR : STEAL_R;
-  if (Math.hypot(t.x - heli.x, t.y - heli.y) > reach || Math.hypot(heli.vx, heli.vy) > 60) { say('Get closer to the jeep, then hold on it'); return; }
+  if (!t.parked || heli.alt > 0 || heli.want || Math.hypot(t.x - heli.x, t.y - heli.y) > reach || Math.hypot(heli.vx, heli.vy) > 30) { say('Land next to an empty one, then hold on it'); return; }   // 3.43
   stealAsk = true; if (heli.want) { heli.want = 0; heli.px = heli.py = 0; }
   say('Going for the jeep');
 }
 function stealCandidate() {
-  if (mode !== 'heli' || dead || pilot.out || Math.hypot(heli.vx, heli.vy) > 60) return null;
+  if (mode !== 'heli' || dead || pilot.out || heli.alt > 0 || heli.want || Math.hypot(heli.vx, heli.vy) > 30) return null;   // 3.43: landed
   let best = null, bd = fuel === 0 ? STEAL_FAR : STEAL_R;
-  for (const t of targets) if (CAR(t) && !t.dead) { const d = Math.hypot(t.x - heli.x, t.y - heli.y); if (d < bd) { bd = d; best = t; } }
+  for (const t of targets) if (CAR(t) && t.parked && !t.dead) { const d = Math.hypot(t.x - heli.x, t.y - heli.y); if (d < bd) { bd = d; best = t; } }
   return best;
 }
 function liftNow() { if (mode === 'heli' && heli.want === 0 && fuel > 0 && !dead) heli.want = 1; }
@@ -998,7 +1009,7 @@ cv.addEventListener('pointerdown', e => {
     const side = dL <= dR ? 'tsL' : 'tsR';   // 3.33: the nearer resting ring (defaults = left / right half)
     if ([...fingers.values()].some(o => o.mode === side)) return;
     const f = { ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY, t: performance.now(), path: [], mode: side };
-    if (side === 'tsL' || mode === 'jeep') { const jh = jeepUnder(e.clientX, e.clientY); if (jh) f.jeepHold = jh; }   // hold on a jeep = take it (3.32: from a jeep, either thumb)
+    { const jh = jeepUnder(e.clientX, e.clientY); if (jh) f.jeepHold = jh; }   // 3.43: either thumb, always (jeepUnder says when)   // hold on a jeep = take it (3.32: from a jeep, either thumb)
     fingers.set(e.pointerId, f); return;
   }
   const now = performance.now();
@@ -1072,7 +1083,7 @@ function up(e) {
       if (now - last < 350) { stickTap[f.mode] = 0;
         if (f.mode === 'tsR') { gunLatch = !gunLatch; gunOn = gunLatch; say(mode === 'jeep' ? (gunLatch ? 'Auto aim ON (double-tap AIM to stop)' : 'Auto aim off') : gunLatch ? 'Gun ON (double-tap AIM to stop)' : 'Gun off', 1.5); }
         else if (mode === 'heli' && heli.want > 0) toggleLand();
-        else goPick();   // 3.34: landed / in a jeep / pilot running: go for what AIM picked
+        // 3.43: double-tap FLY no longer goes for a picked vehicle
       } else stickTap[f.mode] = now;
     }
     return;
@@ -1200,7 +1211,7 @@ function spawnTarget(kind, near) {
     if (isWater(x, y) || nearPads(x, y, 350)) continue;
     if (nearBuilding(x, y, 20) || nearBase(x, y, 160)) continue;
     // 2.0 (the player 18:23): one bullet kills a balloon or a drone
-    const hp = { tank: 8, jeep: 3, balloon: 1, drone: 1 }[kind];
+    const hp = { tank: 14, jeep: 3, balloon: 1, drone: 1 }[kind];   // 3.43 (the player 19:41 "Give tanks more armor"): tank 8 -> 14
     targets.push({ kind, x, y, hd: R() * 6.28, tur: R() * 6.28, hp, max: hp, air: kind === 'balloon' || kind === 'drone', r: { balloon: 16, drone: 12, tank: 18, jeep: 14 }[kind],
       vx: 0, vy: 0, t: R() * 10, hit: 0, dead: 0, cool: 1 + R() * 3,
       // 2.0: free tanks (not guarding a base) drive about some of the time
@@ -1218,7 +1229,7 @@ function spawnGuard(b, kind = 'tank') {
   for (let k = 0; k < 40; k++) {
     const a = R() * 6.28, d = kind === 'tank' ? 190 + R() * 140 : 120 + R() * 120, x = b.x + Math.cos(a) * d, y = b.y + Math.sin(a) * d;
     if (isWater(x, y) || nearBuilding(x, y, 20)) continue;
-    const hp = kind === 'tank' ? 8 : 1;
+    const hp = kind === 'tank' ? 14 : 1;
     targets.push({ kind, x, y, hd: R() * 6.28, tur: R() * 6.28, hp, max: hp, air: kind === 'balloon', r: kind === 'balloon' ? 16 : 18, vx: 0, t: R() * 10, hit: 0, dead: 0, cool: 1 + R() * 3, guard: b });
     return;
   }
@@ -1288,7 +1299,7 @@ const seenAt = (x, y) => seen[Math.max(0, Math.min(FN - 1, Math.floor(y / FOG)))
 // driving, JEEP_AMMO rounds, all its own. A jeep you steal has full armor and a part-full tank and gun; a jeep you
 // leave keeps what it had. Out of fuel it only crawls (JEEP_CRAWL of top speed). The chopper out of fuel on the
 // ground: the pilot will run up to STEAL_FAR for a jeep.
-const LIVES = 10, JEEP_V = 280, JEEP_HP = 4, JEEP_TURN = 4, STEAL_R = 160, STEAL_FAR = 600;
+const LIVES = 10, JEEP_V = 280, JEEP_HP = 4, JEEP_TURN = 4, STEAL_R = 120, STEAL_FAR = 600;   // 3.43: STEAL_R 160 -> 120 (right next to it)
 const JEEP_FUEL = 150, JEEP_AMMO = 400, JEEP_CAN = 0.5, JEEP_BOX = 400;   // can = half a chopper tank; box = 400 rounds + 2 rockets
 let mode = 'heli', jeep = null, lives = LIVES, won = null, mapBig = false;
 // 3.8 (the player 11-11 15:57 "the general should be more insightful, more clever, more hurtfully sarcastic about specifics of
@@ -1363,7 +1374,7 @@ function pilotStep(dt) {
       stealAsk = false;
       // 2.2: landed near an enemy jeep: the pilot runs over and takes it (2.4: out of fuel, he'll run further for one)
       let best = null, bd = fuel === 0 ? STEAL_FAR : STEAL_R;
-      for (const t of targets) if (CAR(t) && !t.dead) { const d = Math.hypot(t.x - heli.x, t.y - heli.y); if (d < bd) { bd = d; best = t; } }
+      for (const t of targets) if (CAR(t) && t.parked && !t.dead) { const d = Math.hypot(t.x - heli.x, t.y - heli.y); if (d < bd) { bd = d; best = t; } }
       if (!best) say('No jeep close enough');
       if (best) { best.stolen = true; Object.assign(pilot, { out: true, x: heli.x + Math.cos(heli.hd) * 16, y: heli.y + Math.sin(heli.hd) * 16, base: null, leg: 'steal', load: '', goal: [best.x, best.y], jeepT: best }); }
     }
@@ -1417,7 +1428,7 @@ let fuel = FUEL_MAX, prevAlt = 0;
 function takeJeep(t) {
   targets.splice(targets.indexOf(t), 1);
   const tk = t.kind === 'tank', HPM = tk ? TANK_HP : JEEP_HP, AM = tk ? TANK_AMMO : JEEP_AMMO;   // 3.41
-  const s = t.js || { hp: t.bailed ? Math.max(1, Math.floor(HPM * t.hp / t.max)) : HPM, fuel: JEEP_FUEL * (0.5 + R() * 0.5), ammo: Math.round(AM * (0.4 + R() * 0.6)), cargo: { fuel: false, ammo: false } };
+  const s = t.js || { hp: t.bailed ? Math.ceil(HPM / 2) : HPM,   /* 3.43: half armor */ fuel: JEEP_FUEL * (0.5 + R() * 0.5), ammo: Math.round(AM * (0.4 + R() * 0.6)), cargo: { fuel: false, ammo: false } };
   jeep = { tank: tk, aim: tk ? (t.tur === undefined ? t.hd : t.tur) : undefined, x: t.x, y: t.y, hd: t.hd, v: 0, vx: 0, vy: 0, hp: s.hp, fuel: s.fuel, ammo: s.ammo, cargo: { ...s.cargo }, hurt: 0, away: false, crashT: 0 };
   mode = 'jeep'; pilot.out = false; pilot.cam = false; pilot.jeepT = null; gunOn = gunLatch = false; fingers.clear();
   if (navigator.vibrate) navigator.vibrate(40);
@@ -1433,6 +1444,7 @@ function takeJeep(t) {
 const PICK_R = 600, PICK_CONE = 0.8;
 let pick = null;   // 'heli' | a jeep target | null
 function pickActive() {
+  return false;   // 3.43 (the player 19:41): AIM only aims and shoots; it never selects a vehicle
   if (dead || won || !sticksOn() && !padAimedAny) return false;
   // 3.35: in a jeep AIM aims (and fires); it also picks while the jeep is stopped
   return (mode === 'jeep' && jeep && Math.hypot(jeep.vx, jeep.vy) < 30) || (mode === 'heli' && heli.alt === 0 && !heli.want) || (mode === 'heli' && pilot.out && pilot.leg !== 'to' && pilot.leg !== 'load');
