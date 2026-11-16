@@ -1,4 +1,6 @@
-# Apocalypse Now!
+# Ragnarun
+
+(Called *Apocalypse Now!* until version 3.48, which is why the repo and the link keep that name.)
 
 A helicopter game in a single HTML file. Fly over five worlds, steal jeeps, and capture the flag.
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Apocalypse Now!</title>
+<title>Ragnarun</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -35,7 +35,7 @@
 <div id="help"><div class="p"></div></div>
 <script>
 "use strict";
-// Apocalypse Now! (repo rotorwash) 1.8 (drag only, fixed buttons, hold GUN, ammo, base arrow); 0.2 — a helicopter over a little world. Flick to fly (it tilts and coasts), flick
+// Ragnarun (was "Apocalypse Now!" until 3.48, 2026-11-16; repo rotorwash; localStorage keys keep the apocalypse.* prefix so saves survive) 1.8 (drag only, fixed buttons, hold GUN, ammo, base arrow); 0.2 — a helicopter over a little world. Flick to fly (it tilts and coasts), flick
 // back to stop, hold still to brake, hold and circle (or twist two fingers) to turn. GUN and ROCKET buttons.
 // Double-tap to land or take off.
 // 2.6 (the player 11-05 00:41): five levels (Green Valley, Desert, Snow, Jungle, Volcano), each its own map and look; flag = next level.
@@ -62,7 +62,7 @@ let QUAL = window.AndroidLog || / wv\)/.test(navigator.userAgent) ? 3 : 1.75; co
 let fpsAcc = 0, fpsN = 0, fpsShow = 0, fpsT0 = 0;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.47';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.48';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -655,7 +655,7 @@ function showHelp() {
   const b1 = el('button', 'CLOSE'); b1.onclick = close; const b2 = el('button', 'CLOSE'); b2.onclick = close;
   P.replaceChildren(el('h2', 'HOW TO PLAY'), b1);
   for (const [h, lines] of HELP) { P.append(el('h3', h)); const ul = el('ul'); for (const l of lines) ul.append(el('li', l)); P.append(ul); }
-  P.append(b2, el('div', 'Apocalypse Now ' + VERSION, 'v'));
+  P.append(b2, el('div', 'Ragnarun ' + VERSION, 'v'));
   box.style.display = 'flex'; P.scrollTop = 0; helpOpen = true; fingers.clear();
 }
 function setZoom() { Z = ZOOMS[zoomI] * (sticksOn() ? 1 : 1.25); wvw = vw / Z; wvh = vh / Z; }
