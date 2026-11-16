@@ -62,7 +62,7 @@ let QUAL = window.AndroidLog || / wv\)/.test(navigator.userAgent) ? 3 : 1.75; co
 let fpsAcc = 0, fpsN = 0, fpsShow = 0, fpsT0 = 0;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.43';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.44';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -1723,6 +1723,18 @@ function blowCache(c) {
   if (Math.hypot(heli.x - x, heli.y - y) < 60 && heli.alt < 0.5 && mode === 'heli' && !dead) hitHeli(2, 'wreck');
 }
 const cacheAt = (x, y, m) => caches.find(c => c.loads > 0 && Math.abs(c.x - x) < m && Math.hypot(c.x - x, c.y - y) < m);
+// 3.44 (the player 11-15 19:50 "When a downed chopper crashes on something it also explodes"): where a shot-down chopper hits
+// the ground (the enemy one in VERSUS), or yours wrecks on something it landed on, what is under it blows up too: vehicles,
+// towers, walls, fuel tanks and ammo crates (full damage, no points), a house (burns and falls in), a cache, a mine.
+// Inside CRASH_R. Yours, if you are on the ground right there, takes 2 armor.
+const CRASH_R = 34;
+function crashOn(x, y, self) {
+  for (const t of targets) if (!t.air && !t.dead && t.kind !== 'foe' && nearT(t, x, y, CRASH_R - (t.r || 0) * 0.5)) damage(t, 99, true);
+  const hb = buildingAt(x, y, CRASH_R * 0.5); if (hb) hurtBuilding(hb, 999);
+  const hc = cacheAt(x, y, CRASH_R + 10); if (hc) blowCache(hc);
+  for (let i = mines.length - 1; i >= 0; i--) if (Math.hypot(mines[i].x - x, mines[i].y - y) < CRASH_R + 10) detonate(i);
+  if (!self && !dead) { const P = me(); if ((mode === 'jeep' || heli.alt < 0.3) && Math.hypot(P.x - x, P.y - y) < CRASH_R + 16) hitHeli(2, 'wreck'); }
+}
 { const r = rng(hash(5, 5, 5 + LEVEL - 1));
   for (const kind of ['fuel', 'ammo']) for (let k = 0, n = 0; k < 8000 && n < CACHES; k++) {
     let x, y;
@@ -2031,7 +2043,8 @@ function foeStep(c, dt) {
   if (c.down) {                                    // spins down, then back on its pad after FOE_BACK s
     c.down.t += dt; c.air = false; c.spin *= Math.exp(-dt); c.hd = ang(c.hd + dt * 6 * c.alt); c.alt = Math.max(0, c.alt - dt * 0.8);
     c.vx *= Math.exp(-dt); c.vy *= Math.exp(-dt); c.x += c.vx * dt; c.y += c.vy * dt;
-    if (c.alt === 0 && !c.down.boomed) { c.down.boomed = true; boom(c.x, c.y, 60); if (!isWater(c.x, c.y)) { addScorch(c.x, c.y, true); smokers.push({ x: c.x, y: c.y, t: 0, life: 20 }); } }
+    if (c.alt === 0 && !c.down.boomed) { c.down.boomed = true; boom(c.x, c.y, 60); crashOn(c.x, c.y);   // 3.44
+      if (!isWater(c.x, c.y)) { addScorch(c.x, c.y, true); smokers.push({ x: c.x, y: c.y, t: 0, life: 20 }); } }
     if (c.down.t > FOE_BACK) foeSpawn();
     return;
   }
@@ -2112,7 +2125,7 @@ function step(dt) {
     if (heli.want) { fuel = Math.max(0, fuel - dt); if (fuel === 0) { run.fuelOut++; heli.want = 0; heli.px = heli.py = 0; if (navigator.vibrate) navigator.vibrate([100, 60, 100]); } }
     if (prevAlt > 0 && heli.alt === 0) {          // touchdown
       const onC = cacheAt(heli.x, heli.y, CACHE_ON); if (onC) { blowCache(onC); die('wreck'); }   // 3.14: landed on a cache
-      else if (nearBuilding(heli.x, heli.y, 10) || treeAt(heli.x, heli.y, 8) || baseObj(heli.x, heli.y) || targets.some(t => !t.air && !t.dead && nearT(t, heli.x, heli.y, 16))) die('wreck');
+      else if (nearBuilding(heli.x, heli.y, 10) || treeAt(heli.x, heli.y, 8) || baseObj(heli.x, heli.y) || targets.some(t => !t.air && !t.dead && nearT(t, heli.x, heli.y, 16))) { die('wreck'); crashOn(heli.x, heli.y, true); }   // 3.44: what it hit goes too
     }
     if (!dead && heli.alt === 0 && !heli.want && isWater(heli.x, heli.y)) { heli.sink = (heli.sink || 0) + dt; if (heli.sink >= SINK_T) die('water'); }
     else heli.sink = Math.max(0, (heli.sink || 0) - dt * 2);
@@ -3395,7 +3408,7 @@ rec({ e: 'start', v: VERSION, versus: VS ? VS.seed : 0, TURN, FAST_K, FACE_DEAD,
 if (new URLSearchParams(location.search).has('scores')) { history.replaceState(null, '', location.pathname); setTimeout(() => showScores(() => {}), 300); }   // 3.27: widget SCORES button
 if (VS) { foeSpawn(); say('VERSUS on ' + TH.name + ': bring their red flag to your pad. First to ' + VS_WIN, 5); }
 else say('Level ' + LEVEL + ': ' + TH.name + (LEVEL > THEMES.length ? ' (harder)' : ''), 3.5);
-window.rw = { hlpR, showHelp, get helpOpen() { return helpOpen; }, HELP, CAR, parkCar, TANK_HP, TANK_AMMO, TANK_V, TGUN_DMG, zmR, get zoomI() { return zoomI; }, ZOOMS, resR, get sureK() { return sureK; }, get flockWait() { return flockWait; }, set flockWait(v) { flockWait = v; }, spawnFlock: () => { flockWait = 0.0001; }, FLYERS, GRAZERS, grazersNear, deadGrazers, killGrazer, get pick() { return pick; }, set pick(v) { pick = v; }, pickToward, goPick, pickActive, pickCands, ngR, exR, newerV, newGame, exitGame, runners, bailJeep, swapJeep, bailAt, get pos() { return pos; }, centreOf, get sticksHidden() { return sticksShow === 'none'; }, get sticksShow() { return sticksShow; }, stR, rstR, HOLD_MOVE, get dpr() { return dpr; }, get fps() { return fpsShow; }, RKT_ZONE, aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
+window.rw = { crashOn, CRASH_R, hlpR, showHelp, get helpOpen() { return helpOpen; }, HELP, CAR, parkCar, TANK_HP, TANK_AMMO, TANK_V, TGUN_DMG, zmR, get zoomI() { return zoomI; }, ZOOMS, resR, get sureK() { return sureK; }, get flockWait() { return flockWait; }, set flockWait(v) { flockWait = v; }, spawnFlock: () => { flockWait = 0.0001; }, FLYERS, GRAZERS, grazersNear, deadGrazers, killGrazer, get pick() { return pick; }, set pick(v) { pick = v; }, pickToward, goPick, pickActive, pickCands, ngR, exR, newerV, newGame, exitGame, runners, bailJeep, swapJeep, bailAt, get pos() { return pos; }, centreOf, get sticksHidden() { return sticksShow === 'none'; }, get sticksShow() { return sticksShow; }, stR, rstR, HOLD_MOVE, get dpr() { return dpr; }, get fps() { return fpsShow; }, RKT_ZONE, aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
 window.rwSet = o => { Object.assign(heli, o); if (o.x !== undefined) { cam.x = heli.x; cam.y = heli.y; } flown = turned = !!o.flown; };
 const q = new URLSearchParams(location.search);
 if (q.has('shot')) rwSet({ x: +q.get('x') || PAD.x, y: +q.get('y') || PAD.y, alt: +q.get('alt') || 0, spin: +(q.get('spin') || 0), want: q.get('alt') > 0 ? 1 : 0, hd: +(q.get('hd') || 0), vx: +(q.get('vx') || 0), vy: +(q.get('vy') || 0), flown: q.has('flown') });
