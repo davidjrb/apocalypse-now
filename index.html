@@ -62,7 +62,7 @@ let QUAL = window.AndroidLog || / wv\)/.test(navigator.userAgent) ? 3 : 1.75; co
 let fpsAcc = 0, fpsN = 0, fpsShow = 0, fpsT0 = 0;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.46';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.47';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -3111,8 +3111,7 @@ function drawReadout(g) {   // the old full panel + LEVELS / VERSUS / jeep switc
   g.fillStyle = VS ? '#ffd0c8' : '#e8ecd8'; g.fillText(VS ? 'NEW MAP' : 'VERSUS', vsR.x + vsR.w / 2, vsR.y + vsR.h / 2 + 1);
   g.fillStyle = 'rgba(60,50,0,0.6)'; g.fillRect(hlpR.x, hlpR.y, hlpR.w, hlpR.h); g.strokeStyle = '#ffd64a'; g.strokeRect(hlpR.x + 0.5, hlpR.y + 0.5, hlpR.w - 1, hlpR.h - 1);   // 3.41
   g.fillStyle = '#ffd64a'; g.font = '800 13px system-ui, sans-serif'; g.fillText('? HELP', hlpR.x + hlpR.w / 2, hlpR.y + hlpR.h / 2 + 1);
-  if (sticksOn()) { g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(aimR.x, aimR.y, aimR.w, aimR.h); g.strokeStyle = '#e8ecd8'; g.lineWidth = 1.5; g.strokeRect(aimR.x + 0.5, aimR.y + 0.5, aimR.w - 1, aimR.h - 1);   // 3.45
-    g.fillStyle = '#e8ecd8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '800 12px system-ui, sans-serif'; g.fillText(aimMode === 'turn' ? 'AIM: TURN' : 'AIM: POINT', aimR.x + aimR.w / 2, aimR.y + aimR.h / 2 + 1); } g.font = '700 13px system-ui, sans-serif'; g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
+  g.font = '700 13px system-ui, sans-serif'; g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
   stR.x = rstR.x = vw - stR.w - 10; stR.y = 12; rstR.y = 50;   // 3.33: top right, clear of the FLY ring
   ngR.x = vw - 164; exR.x = vw - 72; ngR.y = exR.y = sticksOn() ? 88 : 12;   // 3.33: NEW GAME + EXIT
   // 3.38 RESUME; 3.39 (the player 11-15 18:17 "Resume button should not obstruct minimap view"): upright just under the map,
@@ -3124,6 +3123,15 @@ function drawReadout(g) {   // the old full panel + LEVELS / VERSUS / jeep switc
     const zs = [[10, lvlR.y + lvlR.h + 8], [10, vh - zmR.h - 10], [vw - 10 - zmR.w, vh - zmR.h - 40]], zp = zs.find(c => clear(zmR, c)) || zs[0]; zmR.x = zp[0]; zmR.y = zp[1];
     const spots = [[vw - 10 - resR.w, exR.y + exR.h + 8], [10, lvlR.y + lvlR.h + 8 + (zp === zs[0] ? zmR.h + 8 : 0)], [10, vh - resR.h - 10 - (zp === zs[1] ? zmR.h + 8 : 0)], [vw - 10 - resR.w, vh - resR.h - 40 - (zp === zs[2] ? zmR.h + 8 : 0)]];
     const sp = spots.find(c => clear(resR, c)) || spots[1]; resR.x = sp[0]; resR.y = sp[1];
+    // 3.47 (the player 11-15 22:01 "Stop obstructing minimap", photo: AIM: TURN sat on the big map): AIM: TURN / POINT takes the
+    // first margin spot that is off the map square, clear of the FLY / AIM rings and of every other button.
+    const mapL = (vw - (vh - 24)) / 2 - 4, mapR = vw - mapL, A = aimR, over = (c, o) => c[0] < o.x + o.w && o.x < c[0] + A.w && c[1] < o.y + o.h && o.y < c[1] + A.h;
+    const offMap = c => c[0] + A.w < mapL || c[0] > mapR, onScreen = c => c[0] >= 4 && c[1] >= 4 && c[0] + A.w <= vw - 4 && c[1] + A.h <= vh - 34;
+    const cand = [[hlpR.x + hlpR.w + 6, hlpR.y], [10, lvlR.y + lvlR.h + 8], [10, zmR.y - A.h - 8], [10, vh - A.h - 10], [vw - 10 - A.w, resR.y + resR.h + 8], [vw - 10 - A.w, vh - A.h - 40], [vw - 10 - A.w, resR.y - A.h - 8], [zmR.x + zmR.w + 6, zmR.y]];
+    const ok = c => onScreen(c) && offMap(c) && ![resR, zmR, lvlR, vsR, hlpR, stR, rstR, ngR, exR].some(o => over(c, o));
+    const ac = cand.find(c => ok(c) && clear(A, c)) || cand.find(ok) || cand[0]; A.x = ac[0]; A.y = ac[1];
+    g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(A.x, A.y, A.w, A.h); g.strokeStyle = '#e8ecd8'; g.lineWidth = 1.5; g.strokeRect(A.x + 0.5, A.y + 0.5, A.w - 1, A.h - 1);   // 3.45
+    g.fillStyle = '#e8ecd8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '800 12px system-ui, sans-serif'; g.fillText(aimMode === 'turn' ? 'AIM: TURN' : 'AIM: POINT', A.x + A.w / 2, A.y + A.h / 2 + 1);
   }
   { const r = zmR; g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(r.x, r.y, r.w, r.h); g.strokeStyle = '#e8ecd8'; g.lineWidth = 1.5; g.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);   // 3.40 ZOOM
     g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '800 18px system-ui, sans-serif';
