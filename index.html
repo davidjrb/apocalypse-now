@@ -62,7 +62,7 @@ let QUAL = window.AndroidLog || / wv\)/.test(navigator.userAgent) ? 3 : 1.75; co
 let fpsAcc = 0, fpsN = 0, fpsShow = 0, fpsT0 = 0;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.44';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.45';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -623,11 +623,20 @@ const zmR = { x: 10, y: 196, w: 154, h: 30 };
 // VERSUS on the big map opens a panel of how-to lines (the hints 3.38 took off the screen), grouped, big text; CLOSE
 // goes back to the map (the game stays paused). Short lines on purpose.
 const hlpR = { x: 170, y: 158, w: 60, h: 30 };
+// 3.45 (the player 11-15 20:51 "move the joystick to somewhere and then do like a rotational thing and it'll start rotating in
+// the direction that you rotating ... more of a rotational correlation" + "if I hold down the aim button and I'm aiming the
+// turret it should be shooting"): AIM is a knob (TURN). Thumb down, circle it: the chopper's nose / the turret turns by the
+// angle the thumb swept (KNOB_GAIN), not to where the thumb points; thumb still = no turn; within KNOB_MIN of where the
+// thumb landed nothing turns (no jumps). Jeep/tank: the gun fires the whole time a thumb is on AIM. POINT = the 3.35 way,
+// one tap on the big map (AIM: TURN / POINT, apocalypse.aim). A controller's right stick keeps pointing.
+const KNOB_GAIN = 1, KNOB_MIN = 10, KNOB_LEAD = 1.5; let aimMode = 'turn';
+try { if (localStorage.getItem('apocalypse.aim') === 'point') aimMode = 'point'; } catch (e) {}
+const aimR = { x: 236, y: 158, w: 104, h: 30 };
 const HELP = [
   ['Fly', ['Sideways: push the FLY stick (left) the way you want to go.', 'Upright: drag your finger on the screen.', 'Let go and it keeps drifting, then slows down.', 'Push FLY when landed to take off.']],
-  ['Shoot', ['AIM stick (right): hold and push = turn and shoot that way.', 'Double-tap AIM = gun stays on. Double-tap again = off.', 'ROCKET button: homing rocket at what is in front.', 'Upright: GUN and ROCKET buttons.']],
+  ['Shoot', ['AIM stick (right): put your thumb down and turn it in a circle, like a knob.', 'The chopper or the turret turns the same way.', 'In a jeep or tank: thumb on AIM = shooting.', 'AIM: POINT on the big map = the old way (push where to aim).', 'Double-tap AIM = gun stays on. Double-tap again = off.', 'ROCKET button: homing rocket at what is in front.', 'Upright: GUN and ROCKET buttons.']],
   ['Land', ['Double-tap FLY (or the LAND button) = land or take off.', 'Land on your H pad: fuel, ammo and repair.', 'Land on an enemy H: your pilot runs to their fuel and ammo.', 'Do not land on water, trees or houses.']],
-  ['Jeeps and tanks', ['Shoot one until it is almost dead: the crew runs away. Now it is empty.', 'To take it: land right next to it, then hold your finger on it.', 'You get it with half armor.', 'From a jeep or tank: stop next to an empty one and hold on it.', 'DRIVE stick drives. AIM turns the gun or turret.', 'Hold AIM = shoot. Double-tap AIM = auto aim.', 'Drive back to the chopper to fly again.', 'Fuel and ammo you pick up go to the chopper too.']],
+  ['Jeeps and tanks', ['Shoot one until it is almost dead: the crew runs away. Now it is empty.', 'To take it: land right next to it, then hold your finger on it.', 'You get it with half armor.', 'From a jeep or tank: stop next to an empty one and hold on it.', 'DRIVE stick drives. AIM turns the gun or turret.', 'Thumb on AIM = shoot. Double-tap AIM = auto aim.', 'Drive back to the chopper to fly again.', 'Fuel and ammo you pick up go to the chopper too.']],
   ['Flag', ['Find the enemy flag, pick it up, bring it to your H pad.', 'That wins the level. VERSUS: race the other chopper.']],
   ['Map', ['Tap the small map to open this big map. The game pauses.', 'RESUME = back to the game. ZOOM - / + = see more or less.', 'STICKS: show or hide the sticks.', 'Move a stick: on this map, hold it, then drag it.', 'Move ROCKET or the small map: hold it in the game, then drag it.', 'RESET POSITIONS puts them all back. LEVELS: pick a level.', 'NEW GAME and EXIT ask SURE? first.']],
 ];
@@ -904,7 +913,7 @@ function padRead() {
   if (k('KeyP')) s.b.start = true; if (k('Enter') || k('Space')) s.b.go = true;
   for (const f of fingers.values()) {             // 3.20: the sideways thumb sticks
     if (f.mode === 'tsL') { s.lx = (f.x - f.ox) / STK_R.tsL; s.ly = (f.y - f.oy) / STK_R.tsL; }
-    else if (f.mode === 'tsR') { s.rx = (f.x - f.ox) / STK_R.tsR; s.ry = (f.y - f.oy) / STK_R.tsR; }
+    else if (f.mode === 'tsR' && aimMode === 'point') { s.rx = (f.x - f.ox) / STK_R.tsR; s.ry = (f.y - f.oy) / STK_R.tsR; }
   }
   return s;
 }
@@ -931,8 +940,14 @@ function padStep(dt) {
     if (f) { const L = 8 + (m - PAD_DEAD) / (1 - PAD_DEAD) * (DRAG_R - 8); f.x = lx / m * L; f.y = ly / m * L; }
   } else if (f) padDrop();   // 3.25 (the player 22:30 "when you let go of left joystick it keeps its speed just like before"): centred = glide on, like letting go of a drag
   // nose: right stick if pushed, else where the left stick points (air only; the jeep steers itself from the finger)
+  // 3.45: the touch AIM knob: knobD = how far the thumb turned around where it landed since the last frame
+  const kf = aimMode === 'turn' ? [...fingers.values()].find(o => o.mode === 'tsR') : null; let knobD = 0;
+  if (kf) { const dx = kf.x - kf.ox, dy = kf.y - kf.oy;
+    if (Math.hypot(dx, dy) > KNOB_MIN) { const a = Math.atan2(dx, -dy); if (kf.knobA != null) knobD = ang(a - kf.knobA) * KNOB_GAIN; kf.knobA = a; } else kf.knobA = null; }
   if (mode === 'jeep' && jeep) {   // 3.35: AIM pushed = aim + fire while held; let go = back to the double-tap state
-    if (Math.hypot(s.rx, s.ry) > PAD_AIM) { jeep.aimHold = Math.atan2(s.rx, -s.ry); jeep.manual = true; gunOn = true; }
+    if (kf) { const cur = jeep.aim === undefined ? jeep.hd : jeep.aim; if (!jeep.manual) jeep.aimHold = cur;
+      jeep.aimHold = ang(cur + Math.max(-KNOB_LEAD, Math.min(KNOB_LEAD, ang(jeep.aimHold + knobD - cur)))); jeep.manual = true; gunOn = true; }
+    else if (Math.hypot(s.rx, s.ry) > PAD_AIM) { jeep.aimHold = Math.atan2(s.rx, -s.ry); jeep.manual = true; gunOn = true; }
     else if (jeep.manual) { jeep.manual = false; gunOn = gunLatch; }
   }
   if (mode === 'heli' && heli.alt > 0.35) {
@@ -940,7 +955,8 @@ function padStep(dt) {
     // 3.25 (the player 11-11 22:29 "Left js: up down left right relative to map. Right js: direction of helicopter"): the left
     // stick only moves the chopper (map directions), it never turns the nose; only the right stick does, and the nose
     // stays where it was left.
-    if (rm > PAD_AIM) { heli.turnLeft = ang(Math.atan2(s.rx, -s.ry) - heli.hd); padAimed = true; }
+    if (kf) { if (knobD) heli.turnLeft = Math.max(-Math.PI, Math.min(Math.PI, (heli.turnLeft || 0) + knobD)); }   // 3.45
+    else if (rm > PAD_AIM) { heli.turnLeft = ang(Math.atan2(s.rx, -s.ry) - heli.hd); padAimed = true; }
     else if (padAimed) { heli.turnLeft = 0; padAimed = false; }
   }
   // buttons
@@ -974,6 +990,7 @@ cv.addEventListener('pointerdown', e => {
   }
   const inR = r => e.clientX >= r.x && e.clientX <= r.x + r.w && e.clientY >= r.y && e.clientY <= r.y + r.h;   // 3.31
   if (!won && mapBig && inR(resR)) { mapBig = false; sureK = null; return; }
+  if (!won && mapBig && sticksOn() && inR(aimR)) { aimMode = aimMode === 'turn' ? 'point' : 'turn'; try { localStorage.setItem('apocalypse.aim', aimMode); } catch (e) {} return; }   // 3.45
   if (!won && mapBig && inR(hlpR)) { showHelp(); return; }   // 3.41   // 3.38: the one way back in
   if (!won && mapBig && inR(zmR)) {   // 3.40: left third = zoom out, right third = zoom in
     const d = e.clientX < zmR.x + zmR.w / 3 ? -1 : e.clientX > zmR.x + zmR.w * 2 / 3 ? 1 : 0;
@@ -3057,7 +3074,9 @@ function drawReadout(g) {   // the old full panel + LEVELS / VERSUS / jeep switc
   g.strokeStyle = VS ? '#ff7a6a' : '#e8ecd8'; g.strokeRect(vsR.x + 0.5, vsR.y + 0.5, vsR.w - 1, vsR.h - 1);
   g.fillStyle = VS ? '#ffd0c8' : '#e8ecd8'; g.fillText(VS ? 'NEW MAP' : 'VERSUS', vsR.x + vsR.w / 2, vsR.y + vsR.h / 2 + 1);
   g.fillStyle = 'rgba(60,50,0,0.6)'; g.fillRect(hlpR.x, hlpR.y, hlpR.w, hlpR.h); g.strokeStyle = '#ffd64a'; g.strokeRect(hlpR.x + 0.5, hlpR.y + 0.5, hlpR.w - 1, hlpR.h - 1);   // 3.41
-  g.fillStyle = '#ffd64a'; g.font = '800 13px system-ui, sans-serif'; g.fillText('? HELP', hlpR.x + hlpR.w / 2, hlpR.y + hlpR.h / 2 + 1); g.font = '700 13px system-ui, sans-serif'; g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
+  g.fillStyle = '#ffd64a'; g.font = '800 13px system-ui, sans-serif'; g.fillText('? HELP', hlpR.x + hlpR.w / 2, hlpR.y + hlpR.h / 2 + 1);
+  if (sticksOn()) { g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(aimR.x, aimR.y, aimR.w, aimR.h); g.strokeStyle = '#e8ecd8'; g.lineWidth = 1.5; g.strokeRect(aimR.x + 0.5, aimR.y + 0.5, aimR.w - 1, aimR.h - 1);   // 3.45
+    g.fillStyle = '#e8ecd8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '800 12px system-ui, sans-serif'; g.fillText(aimMode === 'turn' ? 'AIM: TURN' : 'AIM: POINT', aimR.x + aimR.w / 2, aimR.y + aimR.h / 2 + 1); } g.font = '700 13px system-ui, sans-serif'; g.textAlign = 'left'; g.textBaseline = 'top'; g.font = '600 13px system-ui, sans-serif';
   stR.x = rstR.x = vw - stR.w - 10; stR.y = 12; rstR.y = 50;   // 3.33: top right, clear of the FLY ring
   ngR.x = vw - 164; exR.x = vw - 72; ngR.y = exR.y = sticksOn() ? 88 : 12;   // 3.33: NEW GAME + EXIT
   // 3.38 RESUME; 3.39 (the player 11-15 18:17 "Resume button should not obstruct minimap view"): upright just under the map,
@@ -3408,7 +3427,7 @@ rec({ e: 'start', v: VERSION, versus: VS ? VS.seed : 0, TURN, FAST_K, FACE_DEAD,
 if (new URLSearchParams(location.search).has('scores')) { history.replaceState(null, '', location.pathname); setTimeout(() => showScores(() => {}), 300); }   // 3.27: widget SCORES button
 if (VS) { foeSpawn(); say('VERSUS on ' + TH.name + ': bring their red flag to your pad. First to ' + VS_WIN, 5); }
 else say('Level ' + LEVEL + ': ' + TH.name + (LEVEL > THEMES.length ? ' (harder)' : ''), 3.5);
-window.rw = { crashOn, CRASH_R, hlpR, showHelp, get helpOpen() { return helpOpen; }, HELP, CAR, parkCar, TANK_HP, TANK_AMMO, TANK_V, TGUN_DMG, zmR, get zoomI() { return zoomI; }, ZOOMS, resR, get sureK() { return sureK; }, get flockWait() { return flockWait; }, set flockWait(v) { flockWait = v; }, spawnFlock: () => { flockWait = 0.0001; }, FLYERS, GRAZERS, grazersNear, deadGrazers, killGrazer, get pick() { return pick; }, set pick(v) { pick = v; }, pickToward, goPick, pickActive, pickCands, ngR, exR, newerV, newGame, exitGame, runners, bailJeep, swapJeep, bailAt, get pos() { return pos; }, centreOf, get sticksHidden() { return sticksShow === 'none'; }, get sticksShow() { return sticksShow; }, stR, rstR, HOLD_MOVE, get dpr() { return dpr; }, get fps() { return fpsShow; }, RKT_ZONE, aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
+window.rw = { get aimMode() { return aimMode; }, set aimMode(v) { aimMode = v; }, aimR, KNOB_MIN, crashOn, CRASH_R, hlpR, showHelp, get helpOpen() { return helpOpen; }, HELP, CAR, parkCar, TANK_HP, TANK_AMMO, TANK_V, TGUN_DMG, zmR, get zoomI() { return zoomI; }, ZOOMS, resR, get sureK() { return sureK; }, get flockWait() { return flockWait; }, set flockWait(v) { flockWait = v; }, spawnFlock: () => { flockWait = 0.0001; }, FLYERS, GRAZERS, grazersNear, deadGrazers, killGrazer, get pick() { return pick; }, set pick(v) { pick = v; }, pickToward, goPick, pickActive, pickCands, ngR, exR, newerV, newGame, exitGame, runners, bailJeep, swapJeep, bailAt, get pos() { return pos; }, centreOf, get sticksHidden() { return sticksShow === 'none'; }, get sticksShow() { return sticksShow; }, stR, rstR, HOLD_MOVE, get dpr() { return dpr; }, get fps() { return fpsShow; }, RKT_ZONE, aimAt, get Z() { return Z; }, get wvw() { return wvw; }, sticksOn, padStep, padRead, get fingers() { return fingers; }, keys, VS, vs, flags, get foe() { return foe; }, FOE_PAD, foeSpawn, foeStep, vsStep, vsPoint, newVersus, vsR, showScores, loadScores, get sbOpen() { return sbOpen; }, blowCache, cacheAt, get jeepOld() { return jeepOld; }, set jeepOld(v) { jeepOld = v; }, jctlR, buildings, burning, hurtBuilding, buildingAt, run, roast, roastFacts, workersNear, deadWorkers, flocks, birdPos, monkeysNear, deadMonkeys, faunaBlast, INNOCENT, general, LEVEL, get unlocked() { return unlocked; }, get pickOpen() { return pickOpen; }, pickRows, lvlR, TH, THEMES, nextLevel, stealCandidate, get stealAsk() { return stealAsk; }, caches, skids, takeJeep, CACHE_LAND, JEEP_FUEL, JEEP_AMMO, JEEP_HP, heli, targets, bullets, rockets, shells, flick, fireRocket, btn, die, hitHeli, restart, addScorch, get dead() { return dead; }, get score() { return score; }, get gunOn() { return gunOn; }, get ammo() { return ammo; }, get rkts() { return rkts; }, get fuel() { return fuel; }, bases, pilot, callReinforcement, damage, mines, flag, flagBase, seen, seenAt, reveal, jeepBlocked, onBridge, bridges, get mode() { return mode; }, get jeep() { return jeep; }, get lives() { return lives; }, set lives(v) { lives = v; }, get won() { return won; }, get mapBig() { return mapBig; }, set mapBig(v) { mapBig = v; }, miniR, get gunLatch() { return gunLatch; }, set ammo(v) { ammo = v; }, set rkts(v) { rkts = v; }, set fuel(v) { fuel = v; }, PAD, toggleLand, isWater, treeAt, nearBuilding };
 window.rwSet = o => { Object.assign(heli, o); if (o.x !== undefined) { cam.x = heli.x; cam.y = heli.y; } flown = turned = !!o.flown; };
 const q = new URLSearchParams(location.search);
 if (q.has('shot')) rwSet({ x: +q.get('x') || PAD.x, y: +q.get('y') || PAD.y, alt: +q.get('alt') || 0, spin: +(q.get('spin') || 0), want: q.get('alt') > 0 ? 1 : 0, hd: +(q.get('hd') || 0), vx: +(q.get('vx') || 0), vy: +(q.get('vy') || 0), flown: q.has('flown') });
