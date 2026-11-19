@@ -62,7 +62,7 @@ let QUAL = window.AndroidLog || / wv\)/.test(navigator.userAgent) ? 3 : 1.75; co
 let fpsAcc = 0, fpsN = 0, fpsShow = 0, fpsT0 = 0;
 // 3.22 (the player 11-11 21:53 "zooms out but not ridiculously"): sideways the world is drawn at ZOOM_SIDE; wvw x wvh = the world
 // area on screen (vw/Z x vh/Z). HUD and buttons stay full size. The computer's view box (foeSees) is the same area.
-const VERSION = '3.49';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
+const VERSION = '3.50';   // 3.23 (the player 11-11 22:19 "show the version when I open minimap"): shown on the big map and LEVELS
 const ZOOM_SIDE = 0.8; let Z = 1, wvw = 0, wvh = 0;
 // 3.17 (the player 11-11 17:21 "full screen in Firefox on Android?"): lay out from the VISIBLE viewport (Firefox's bottom bar
 // covered GUN/ROCKET), and in a browser the first tap asks for full screen (the bars go away; back/Esc leaves it and
@@ -1527,7 +1527,9 @@ function drawPick(g) {
     const lab = (t === 'heli' ? 'CHOPPER' : t.kind === 'tank' ? 'TANK' : 'JEEP') + ' · DOUBLE-TAP FLY';
     g.fillStyle = '#ffd64a'; g.font = `800 ${Math.round(14 * k1)}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'bottom';
     const tw = g.measureText(lab).width / 2 + 8 * k1, lx = Math.max(cam.x - wvw / 2 + tw, Math.min(cam.x + wvw / 2 - tw, x));   // kept on screen
-    g.fillText(lab, lx, y - k - 4 * k1); g.textAlign = 'left'; g.textBaseline = 'top';
+    const below = (y - k - 4 * k1 - cam.y) / wvh + 0.5 < 0.42;   // 3.50: label in the top part of the screen = under the brackets instead (clear of the small map / ROCKET)
+    if (below) g.textBaseline = 'top';
+    g.fillText(lab, lx, below ? y + k + 4 * k1 : y - k - 4 * k1); g.textAlign = 'left'; g.textBaseline = 'top';
   }
 }
 function leaveJeep(noHandover) {
